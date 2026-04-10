@@ -45,7 +45,7 @@ export default function ResultDeck({ filters, location, user, isGuest, isFavMode
     return R * c;
   };
 
-  const fetchFavRoulette = async () => {
+  const fetchFavList = async (autoSpin: boolean) => {
     setLoading(true);
     setError("");
     try {
@@ -82,6 +82,7 @@ export default function ResultDeck({ filters, location, user, isGuest, isFavMode
     } catch { setError("讀取收藏失敗"); }
     finally { setLoading(false); }
   };
+
 
   const fetchFavorites = async () => {
     try {
