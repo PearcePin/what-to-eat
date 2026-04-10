@@ -35,7 +35,7 @@ export default function Quiz({ user, onComplete }: { user: User; onComplete: (f:
     <div className="glass-panel" style={{ animation: "fadeIn 0.5s ease", textAlign: "left" }}>
       {/* 問候 */}
       <p style={{ fontSize: "0.85rem", color: "var(--primary)", fontWeight: 700, marginBottom: "0.2rem" }}>
-        嗨，{user.displayName?.split(' ')[0] ?? '你'} 👋
+        嗨，{user?.displayName?.split(' ')[0] ?? '美食探險家'} 👋
       </p>
 
       {/* 標題 */}

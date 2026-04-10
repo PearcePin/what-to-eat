@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import FeedbackModal from "./FeedbackModal";
 
 interface Location { lat: number; lng: number; label: string; }
@@ -26,7 +26,6 @@ export default function ResultDeck({ filters, location, user, isGuest, isFavMode
   const [userFavorites, setUserFavorites] = useState<string[]>([]); // 儲存 place_id 列表
 
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
-  const isRoutingRef = useRef(false); // 避免重複觸發
 
   useEffect(() => {
     if (isFavMode) fetchFavRoulette();
