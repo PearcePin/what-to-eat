@@ -24,6 +24,7 @@ export default function ResultDeck({ filters, location, user, isGuest, isFavMode
   const [selectedPlace, setSelectedPlace] = useState<any>(null);
   const [feedbackPlace, setFeedbackPlace] = useState<any>(null);
   const [userFavorites, setUserFavorites] = useState<string[]>([]); // 儲存 place_id 列表
+  const [nextPageToken, setNextPageToken] = useState<string | null>(null);
 
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 
@@ -126,19 +127,32 @@ export default function ResultDeck({ filters, location, user, isGuest, isFavMode
     }
   };
 
-  const fetchPlaces = async () => {
+  const fetchPlaces = async (useToken = false) => {
+    if (useToken && !nextPageToken) {
+      alert("範圍內已經沒有符合要求的其他店鋪了喔！");
+      return;
+    }
     setLoading(true);
     setSelectedPlace(null);
     let radius = "1000";
     if (filters.transport.includes("腳踏車")) radius = "3000";
     if (filters.transport.includes("汽機車")) radius = "5000";
     try {
-      const res = await fetch(
-        `/api/places/search?type=${encodeURIComponent(filters.type)}&radius=${radius}&lat=${location.lat}&lng=${location.lng}`
-      );
+      const url = useToken 
+        ? `/api/places/search?pagetoken=${nextPageToken}&lat=${location.lat}&lng=${location.lng}` 
+        : `/api/places/search?type=${encodeURIComponent(filters.type)}&radius=${radius}&lat=${location.lat}&lng=${location.lng}`;
+
+      const res = await fetch(url);
       const data = await res.json();
-      if (data.success) { setPlaces(data.results); setError(""); }
-      else setError(data.error || "無法載入餐廳資料");
+      if (data.success) {
+        if (data.results.length === 0) {
+          alert("範圍內已經沒有符合要求的其他店鋪了喔！");
+        } else {
+          setPlaces(data.results);
+          setNextPageToken(data.nextPageToken || null);
+          setError("");
+        }
+      } else setError(data.error || "無法載入餐廳資料");
     } catch { setError("連線錯誤"); }
     finally { setLoading(false); }
   };
@@ -194,11 +208,21 @@ export default function ResultDeck({ filters, location, user, isGuest, isFavMode
           {isViewFavMode ? "📜 我的收藏清單" : "🍴 附近推薦"}
         </h3>
         {!selectedPlace && !isViewFavMode && !isFavMode && (
-          <button className="btn-secondary" style={{ padding: "6px 16px", fontSize: "0.82rem" }} onClick={fetchPlaces}>
+          <button className="btn-secondary" style={{ padding: "6px 16px", fontSize: "0.82rem" }} onClick={() => fetchPlaces(true)}>
             🔄 換一批
           </button>
         )}
       </div>
+
+      {/* 幸運轉盤 (移到最上方) */}
+      {!selectedPlace && !isSpinning && places.length > 1 && (
+        <div style={{ marginBottom: "1.5rem", textAlign: "center", animation: "fadeIn 0.7s ease" }}>
+          <button className="btn-primary" onClick={handleRoulette}
+            style={{ padding: "14px 0", fontSize: "1.05rem", borderRadius: "16px", width: "100%", boxShadow: "0 4px 15px rgba(255,155,176,0.3)" }}>
+            🎰 選不出來嗎？讓命運決定！
+          </button>
+        </div>
+      )}
 
       {/* 卡片列表 */}
       <div style={{ display: "flex", flexDirection: "column", gap: "1.2rem" }}>
@@ -310,15 +334,16 @@ export default function ResultDeck({ filters, location, user, isGuest, isFavMode
                     className="btn-primary"
                     style={{ padding: "10px", fontSize: "0.88rem", borderRadius: "12px", flex: 1.5 }}
                   >
-                    ✅ {isGuest ? "前往評分等解鎖功能" : "就決定是你了！"}
+                    ✅ {isGuest ? "前往評分解鎖功能" : "就決定是你了！"}
                   </button>
+                  {/* 導航 (獨立一排且更大) */}
                   <a
                     href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(place.name)}&query_place_id=${place.id}`}
                     target="_blank" rel="noreferrer"
                     className="btn-secondary"
-                    style={{ display: "inline-flex", alignItems: "center", padding: "10px 14px", fontSize: "0.88rem", borderRadius: "12px", textDecoration: "none" }}
+                    style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "12px", fontSize: "0.95rem", fontWeight: 700, borderRadius: "12px", textDecoration: "none", width: "100%", marginTop: "4px" }}
                   >
-                    🗺️
+                    🗺️ 開啟 Google Maps 導航前往
                   </a>
                 </div>
               </div>
@@ -327,16 +352,6 @@ export default function ResultDeck({ filters, location, user, isGuest, isFavMode
         })}
       </div>
 
-      {/* 幸運轉盤 */}
-      {!selectedPlace && !isSpinning && places.length > 1 && (
-        <div style={{ marginTop: "2rem", textAlign: "center" }}>
-          <p style={{ color: "var(--text-light)", marginBottom: "0.8rem", fontSize: "0.88rem" }}>選不出來嗎？🤔</p>
-          <button className="btn-primary" onClick={handleRoulette}
-            style={{ padding: "14px 36px", fontSize: "1.05rem", borderRadius: "30px" }}>
-            🎰 讓命運決定！
-          </button>
-        </div>
-      )}
 
       {/* 返回 */}
       {selectedPlace && !isSpinning && (

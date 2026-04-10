@@ -35,6 +35,8 @@ export async function GET(request: Request) {
   const lat = searchParams.get("lat") || "25.033964";
   const lng = searchParams.get("lng") || "121.564468";
 
+  const pageToken = searchParams.get("pagetoken");
+
   const apiKey = process.env.GOOGLE_MAPS_API_KEY || process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
   if (!apiKey) {
     return NextResponse.json({ error: "Missing Google Maps API Key" }, { status: 500 });
@@ -42,7 +44,9 @@ export async function GET(request: Request) {
 
   try {
     // 1. 附近搜尋
-    const placesUrl = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=${radius}&keyword=${encodeURIComponent(type)}&key=${apiKey}`;
+    const placesUrl = pageToken 
+      ? `https://maps.googleapis.com/maps/api/place/nearbysearch/json?pagetoken=${pageToken}&key=${apiKey}`
+      : `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=${radius}&keyword=${encodeURIComponent(type)}&key=${apiKey}`;
     const res = await fetch(placesUrl);
     const data = await res.json();
 
