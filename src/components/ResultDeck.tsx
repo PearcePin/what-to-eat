@@ -16,7 +16,7 @@ const Tag = ({ color, bg, border, children }: any) => (
   </span>
 );
 
-export default function ResultDeck({ filters, location, user, isGuest, isFavMode }: { filters: any; location: Location; user: any; isGuest: boolean; isFavMode?: boolean }) {
+export default function ResultDeck({ filters, location, user, isGuest, isFavMode, onLoginRequest }: { filters: any; location: Location; user: any; isGuest: boolean; isFavMode?: boolean; onLoginRequest?: () => void }) {
   const [loading, setLoading] = useState(true);
   const [places, setPlaces] = useState<any[]>([]);
   const [error, setError] = useState("");
@@ -97,7 +97,9 @@ export default function ResultDeck({ filters, location, user, isGuest, isFavMode
 
   const toggleFavorite = async (place: any) => {
     if (isGuest) {
-      alert("請登入後再使用收藏功能！✨");
+      if (window.confirm("登入後可以將餐廳加入最愛喔！是否現在前往登入？")) {
+        if (onLoginRequest) onLoginRequest();
+      }
       return;
     }
     const isFav = userFavorites.includes(place.id);
@@ -241,22 +243,6 @@ export default function ResultDeck({ filters, location, user, isGuest, isFavMode
                   }}>
                     ⭐ {place.finalScore}
                   </div>
-                  {/* 收藏按鈕 */}
-                  <button
-                    onClick={(e) => { e.stopPropagation(); toggleFavorite(place); }}
-                    style={{
-                      position: "absolute", top: "12px", right: "12px",
-                      background: "rgba(255,255,255,0.85)", backdropFilter: "blur(8px)",
-                      border: "none", width: "36px", height: "36px", borderRadius: "50%",
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                      cursor: "pointer", fontSize: "1.2rem", transition: "transform 0.2s",
-                      boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
-                    }}
-                    onMouseEnter={(e) => e.currentTarget.style.transform = "scale(1.1)"}
-                    onMouseLeave={(e) => e.currentTarget.style.transform = "scale(1)"}
-                  >
-                    {userFavorites.includes(place.id) ? "❤️" : "🤍"}
-                  </button>
                 </div>
               ) : (
                 <div style={{
@@ -308,16 +294,26 @@ export default function ResultDeck({ filters, location, user, isGuest, isFavMode
                 )}
 
                 {/* 按鈕列 */}
-                <div style={{ display: "flex", gap: "8px" }}>
+                <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); toggleFavorite(place); }}
+                    className="btn-secondary"
+                    style={{ padding: "10px", fontSize: "0.88rem", borderRadius: "12px", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", flex: 1 }}
+                  >
+                    {userFavorites.includes(place.id) ? "❤️ 已收藏" : "🤍 加入最愛"}
+                  </button>
                   <button
                     onClick={() => {
-                      if (isGuest) alert("登入後可以幫餐廳評分，並讓推薦更準確喔！🍰");
-                      else setFeedbackPlace(place);
+                      if (isGuest) {
+                        if (window.confirm("登入後可以幫餐廳評分並紀錄歷史喔！是否現在前往登入？")) {
+                          if (onLoginRequest) onLoginRequest();
+                        }
+                      } else setFeedbackPlace(place);
                     }}
                     className="btn-primary"
-                    style={{ flex: 1, padding: "10px", fontSize: "0.88rem", borderRadius: "12px" }}
+                    style={{ padding: "10px", fontSize: "0.88rem", borderRadius: "12px", flex: 1.5 }}
                   >
-                    ✅ 就決定是你了！
+                    ✅ {isGuest ? "前往評分等解鎖功能" : "就決定是你了！"}
                   </button>
                   <a
                     href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(place.name)}&query_place_id=${place.id}`}

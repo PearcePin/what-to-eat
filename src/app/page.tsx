@@ -76,10 +76,16 @@ export default function Home() {
       {showLocation && <LocationPicker onConfirm={(loc) => setLocation(loc)} />}
 
       {/* 模式選擇 (定位後) */}
-      {!!user && !!location && !filters && !isFavMode && (
-        <div style={{ marginBottom: "1.5rem", display: "flex", gap: "10px", animation: "fadeIn 0.5s ease" }}>
-          <button className="btn-secondary" onClick={() => setIsFavMode(true)} style={{ padding: "10px 20px" }}>
-            🎯 抽收藏店家
+      {(!!user || isGuest) && !!location && !filters && !isFavMode && (
+        <div style={{ marginBottom: "1.5rem", display: "flex", flexWrap: "wrap", justifyContent: "center", gap: "10px", animation: "fadeIn 0.5s ease" }}>
+          <button className="btn-secondary" onClick={() => {
+            if (isGuest) {
+              if (window.confirm("登入後可以開啟「最愛抽籤」與「收藏」功能喔！是否現在前往登入？")) setIsGuest(false);
+            } else {
+              setIsFavMode(true);
+            }
+          }} style={{ padding: "10px 20px" }}>
+            🎯 從收藏店家抽籤
           </button>
           <div style={{ width: "1px", background: "rgba(0,0,0,0.1)" }} />
           <p style={{ alignSelf: "center", margin: 0, fontSize: "0.85rem", color: "var(--text-light)" }}>或開始問卷推薦</p>
@@ -90,7 +96,7 @@ export default function Home() {
       {showQuiz && <Quiz user={user!} onComplete={handleQuizComplete} />}
 
       {/* 結果 */}
-      {showResults && <ResultDeck filters={filters} location={location!} user={user} isGuest={isGuest} isFavMode={isFavMode} />}
+      {showResults && <ResultDeck filters={filters} location={location!} user={user} isGuest={isGuest} isFavMode={isFavMode} onLoginRequest={() => { setLocation(null); setFilters(null); setIsFavMode(false); setIsGuest(false); }} />}
 
       {/* 位置標示 */}
       {user && location && (
