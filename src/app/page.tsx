@@ -18,6 +18,7 @@ export default function Home() {
   const [location, setLocation] = useState<Location | null>(null);
   const [filters, setFilters] = useState<any>(null);
   const [isFavMode, setIsFavMode] = useState(false);
+  const [isViewFavMode, setIsViewFavMode] = useState(false);
 
   useEffect(() => {
     if (!auth) return;
@@ -34,11 +35,25 @@ export default function Home() {
   const showLanding  = !started && !user && !isGuest;
   const showLogin    = started && !user && !isGuest;
   const showLocation = (!!user || isGuest) && !location;
-  const showQuiz     = (!!user || isGuest) && !!location && !filters && !isFavMode;
-  const showResults  = (!!user || isGuest) && !!location && (!!filters || isFavMode);
+  const showQuiz     = (!!user || isGuest) && !!location && !filters && !isFavMode && !isViewFavMode;
+  const showResults  = (!!user || isGuest) && !!location && (!!filters || isFavMode || isViewFavMode);
+
+  const resetHome = () => {
+    setLocation(null);
+    setFilters(null);
+    setIsFavMode(false);
+    setIsViewFavMode(false);
+  };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", paddingTop: "2rem" }}>
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", paddingTop: "2rem", position: "relative" }}>
+      {/* 返回首頁 (當在流程中時顯示在左上角) */}
+      {(location || started) && (!showLanding && !showLogin) && (
+        <button onClick={resetHome}
+          style={{ position: "absolute", top: "1rem", left: "1rem", background: "none", border: "none", cursor: "pointer", fontSize: "1.2rem", animation: "fadeIn 0.3s ease", padding: "8px" }}>
+          🏠
+        </button>
+      )}
 
       {/* Hero 標題 */}
       <div style={{ marginBottom: "2rem", animation: "fadeIn 0.6s ease" }}>
@@ -76,7 +91,7 @@ export default function Home() {
       {showLocation && <LocationPicker onConfirm={(loc) => setLocation(loc)} />}
 
       {/* 模式選擇 (定位後) */}
-      {(!!user || isGuest) && !!location && !filters && !isFavMode && (
+      {(!!user || isGuest) && !!location && !filters && !isFavMode && !isViewFavMode && (
         <div style={{ marginBottom: "1.5rem", display: "flex", flexWrap: "wrap", justifyContent: "center", gap: "10px", animation: "fadeIn 0.5s ease" }}>
           <button className="btn-secondary" onClick={() => {
             if (isGuest) {
@@ -85,10 +100,21 @@ export default function Home() {
               setIsFavMode(true);
             }
           }} style={{ padding: "10px 20px" }}>
-            🎯 從收藏店家抽籤
+            🎯 抽收藏店家
           </button>
-          <div style={{ width: "1px", background: "rgba(0,0,0,0.1)" }} />
-          <p style={{ alignSelf: "center", margin: 0, fontSize: "0.85rem", color: "var(--text-light)" }}>或開始問卷推薦</p>
+          <button className="btn-secondary" onClick={() => {
+            if (isGuest) {
+              if (window.confirm("登入後可以查看您的收藏店家！是否現在前往登入？")) setIsGuest(false);
+            } else {
+              setIsViewFavMode(true);
+            }
+          }} style={{ padding: "10px 20px" }}>
+            📜 瀏覽所有收藏
+          </button>
+          <div style={{ width: "100%", height: "8px" }} />
+          <button className="btn-primary" onClick={() => {}} style={{ padding: "10px 30px", pointerEvents: "none", opacity: 0.9 }}>
+            或者 👇
+          </button>
         </div>
       )}
 
@@ -96,15 +122,15 @@ export default function Home() {
       {showQuiz && <Quiz user={user!} onComplete={handleQuizComplete} />}
 
       {/* 結果 */}
-      {showResults && <ResultDeck filters={filters} location={location!} user={user} isGuest={isGuest} isFavMode={isFavMode} onLoginRequest={() => { setLocation(null); setFilters(null); setIsFavMode(false); setIsGuest(false); }} />}
+      {showResults && <ResultDeck filters={filters} location={location!} user={user} isGuest={isGuest} isFavMode={isFavMode} isViewFavMode={isViewFavMode} onLoginRequest={() => { resetHome(); setIsGuest(false); }} />}
 
       {/* 位置標示 */}
-      {user && location && (
+      {(user || isGuest) && location && (
         <p style={{ marginTop: "1rem", fontSize: "0.78rem", color: "var(--text-light)" }}>
-          {filters || isFavMode ? (
-            <button onClick={() => { setLocation(null); setFilters(null); setIsFavMode(false); }}
+          {filters || isFavMode || isViewFavMode ? (
+            <button onClick={resetHome}
               style={{ marginLeft: "8px", color: "var(--primary)", background: "none", border: "none", cursor: "pointer", fontSize: "0.78rem", textDecoration: "underline", fontFamily: "inherit" }}>
-              重新搜尋
+              ← 返回主畫面
             </button>
           ) : (
             <button onClick={() => setLocation(null)}

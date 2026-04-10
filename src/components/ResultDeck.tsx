@@ -16,7 +16,7 @@ const Tag = ({ color, bg, border, children }: any) => (
   </span>
 );
 
-export default function ResultDeck({ filters, location, user, isGuest, isFavMode, onLoginRequest }: { filters: any; location: Location; user: any; isGuest: boolean; isFavMode?: boolean; onLoginRequest?: () => void }) {
+export default function ResultDeck({ filters, location, user, isGuest, isFavMode, isViewFavMode, onLoginRequest }: { filters: any; location: Location; user: any; isGuest: boolean; isFavMode?: boolean; isViewFavMode?: boolean; onLoginRequest?: () => void }) {
   const [loading, setLoading] = useState(true);
   const [places, setPlaces] = useState<any[]>([]);
   const [error, setError] = useState("");
@@ -28,10 +28,11 @@ export default function ResultDeck({ filters, location, user, isGuest, isFavMode
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 
   useEffect(() => {
-    if (isFavMode) fetchFavRoulette();
+    if (isFavMode) fetchFavList(true);
+    else if (isViewFavMode) fetchFavList(false);
     else fetchPlaces();
     if (user) fetchFavorites();
-  }, [filters, isFavMode]);
+  }, [filters, isFavMode, isViewFavMode]);
 
   const getDistance = (lat1: number, lng1: number, lat2: number, lng2: number) => {
     const R = 6371; // km
@@ -51,36 +52,31 @@ export default function ResultDeck({ filters, location, user, isGuest, isFavMode
       const res = await fetch(`/api/favorites?email=${user.email}`);
       const data = await res.json();
       if (data.success) {
-        // 過濾 10km 內的店
-        // 註：placeInfo 需要經緯度，如果當初儲存時沒存，這裡會抓不到。
-        // 但目前 PlaceInfo 只有 place_id。我們需要從 Google 補抓經緯度，
-        // 或者在搜尋結果時就先把經緯度存進 PlaceInfo。
-        // 目前我們先假設 place 結果包含距離資訊 (從 API 吐回來的)
-        // 或者是我們在這裡對每一個 Favorites 呼叫一次 Details (效能較差)
-        // 更好的做法：搜尋時 PlaceInfo 已經快照了經緯度。
-
-        // 過濾 10km 內的店
-        const favs = data.favorites
+        let favs = data.favorites
           .map((f: any) => f.place)
-          .filter((p: any) => {
-            if (!p.lat || !p.lng) return true; // 如果沒存到經緯度，就假設可以抽
-            const dist = getDistance(location.lat, location.lng, p.lat, p.lng);
-            return dist <= 10;
-          })
-          .map((p: any) => ({
-            ...p,
-            id: p.place_id,
-            photoRef: p.photo_ref,
-            finalScore: p.avg_user_rating > 0 ? p.avg_user_rating.toFixed(1) : "–",
-            distanceText: p.lat ? `${getDistance(location.lat, location.lng, p.lat, p.lng).toFixed(1)} km` : null
-          }));
+          .map((p: any) => {
+            const dist = p.lat ? getDistance(location.lat, location.lng, p.lat, p.lng) : 0;
+            return {
+              ...p,
+              id: p.place_id,
+              photoRef: p.photo_ref,
+              finalScore: p.avg_user_rating > 0 ? p.avg_user_rating.toFixed(1) : "–",
+              distanceText: p.lat ? `${dist.toFixed(1)} km` : null,
+              _dist: dist
+            };
+          });
+
+        if (autoSpin) {
+          favs = favs.filter((p: any) => !p.lat || p._dist <= 10);
+        } else {
+          favs.sort((a: any, b: any) => a._dist - b._dist);
+        }
 
         if (favs.length === 0) {
-          setError("10公里內沒有找到您的收藏店家喔！");
+          setError(autoSpin ? "10公里內沒有找到您的收藏店家喔！" : "您還沒有收藏任何餐廳喔！");
         } else {
           setPlaces(favs);
-          // 自動開始轉盤
-          setTimeout(() => handleRoulette(), 500);
+          if (autoSpin) setTimeout(() => handleRoulette(), 500);
         }
       }
     } catch { setError("讀取收藏失敗"); }
@@ -97,7 +93,7 @@ export default function ResultDeck({ filters, location, user, isGuest, isFavMode
 
   const toggleFavorite = async (place: any) => {
     if (isGuest) {
-      if (window.confirm("登入後可以將餐廳加入最愛喔！是否現在前往登入？")) {
+      if (window.confirm("這項功能需要登入解鎖喔！是否現在前往登入？")) {
         if (onLoginRequest) onLoginRequest();
       }
       return;
@@ -194,9 +190,9 @@ export default function ResultDeck({ filters, location, user, isGuest, isFavMode
       {/* 標題列 */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.2rem" }}>
         <h3 style={{ margin: 0, fontSize: "1.1rem", color: "var(--text)" }}>
-          🍴 附近推薦
+          {isViewFavMode ? "📜 我的收藏清單" : "🍴 附近推薦"}
         </h3>
-        {!selectedPlace && (
+        {!selectedPlace && !isViewFavMode && !isFavMode && (
           <button className="btn-secondary" style={{ padding: "6px 16px", fontSize: "0.82rem" }} onClick={fetchPlaces}>
             🔄 換一批
           </button>
