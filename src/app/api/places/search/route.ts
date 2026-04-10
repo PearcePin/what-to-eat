@@ -127,12 +127,17 @@ export async function GET(request: Request) {
       };
     });
 
-    // 5. 排序：開業中 > 無資料 > 已打烊，同狀態內依 finalScore
+    // 5. 排序：開業中 > 無資料 > 已打烊，同狀態內依 finalScore (加入隨機擾動)
     const openPriority = (a: any) =>
       a.openNow === true ? 0 : a.openNow === null ? 1 : 2;
     recommendations.sort((a, b) => {
       const diff = openPriority(a) - openPriority(b);
-      return diff !== 0 ? diff : b.finalScore - a.finalScore;
+      if (diff !== 0) return diff;
+      
+      // 給予 ±0.6 的隨機擾動值，讓每次搜尋結果有一點隨機性，但好店依然容易在上面
+      const scoreA = a.finalScore + (Math.random() * 1.2 - 0.6);
+      const scoreB = b.finalScore + (Math.random() * 1.2 - 0.6);
+      return scoreB - scoreA;
     });
 
     return NextResponse.json({
