@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import FeedbackModal from "./FeedbackModal";
 
 interface Location { lat: number; lng: number; label: string; }
