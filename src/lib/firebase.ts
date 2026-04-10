@@ -10,24 +10,25 @@ const firebaseConfig = {
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
 };
 
-// Initialize Firebase only once
-let app;
-let auth: any;
-let googleProvider: any;
-
-if (typeof window !== "undefined" || process.env.NEXT_PUBLIC_FIREBASE_API_KEY) {
-  try {
-    app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
-    auth = getAuth(app);
-    googleProvider = new GoogleAuthProvider();
-  } catch (error) {
-    console.error("Firebase initialization error", error);
+// 只有在瀏覽器環境且有金鑰時才初始化
+const getFirebase = () => {
+  if (typeof window !== "undefined" && process.env.NEXT_PUBLIC_FIREBASE_API_KEY) {
+    try {
+      const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
+      const auth = getAuth(app);
+      const googleProvider = new GoogleAuthProvider();
+      return { auth, googleProvider };
+    } catch (error) {
+      console.error("Firebase init error:", error);
+    }
   }
-}
+  return { auth: null, googleProvider: null };
+};
 
-export { auth, googleProvider };
+export const { auth, googleProvider } = getFirebase();
 
 export const loginWithGoogle = async () => {
+  if (!auth) return;
   try {
     const result = await signInWithPopup(auth, googleProvider);
     return result.user;
@@ -38,5 +39,5 @@ export const loginWithGoogle = async () => {
 };
 
 export const logout = async () => {
-  return signOut(auth);
+  if (auth) return signOut(auth);
 };

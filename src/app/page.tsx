@@ -1,5 +1,7 @@
 "use client";
 
+export const dynamic = "force-dynamic";
+
 import { useState, useEffect } from "react";
 import { User } from "firebase/auth";
 import { auth, loginWithGoogle, logout } from "@/lib/firebase";
@@ -16,7 +18,8 @@ export default function Home() {
   const [filters, setFilters] = useState<any>(null);
 
   useEffect(() => {
-    const unsubscribe = auth.onAuthStateChanged((u) => setUser(u));
+    if (!auth) return;
+    const unsubscribe = auth.onAuthStateChanged((u: any) => setUser(u));
     return () => unsubscribe();
   }, []);
 
