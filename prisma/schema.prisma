@@ -1,0 +1,48 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+// 根據您的環境選擇 provider。為了開發方便，我們暫時改用 sqlite，無須外部設定檔。
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  name      String?
+  logs      Log[]
+  createdAt DateTime @default(now())
+}
+
+model PlaceInfo {
+  place_id        String       @id
+  avg_user_rating Float        @default(0.0)
+  rating_count    Int          @default(0)
+  override_price  String?
+  override_hours  String?
+  reviews         UserReview[]
+  updatedAt       DateTime     @updatedAt
+}
+
+model UserReview {
+  id          String   @id @default(uuid())
+  user_id     String?
+  place_id    String
+  rating      Float
+  override_price String?
+  override_hours String?
+  createdAt   DateTime @default(now())
+
+  place       PlaceInfo @relation(fields: [place_id], references: [place_id])
+}
+
+model Log {
+  log_id    String   @id @default(uuid())
+  user_id   String
+  action    String
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [user_id], references: [id])
+}
