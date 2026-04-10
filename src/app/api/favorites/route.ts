@@ -32,6 +32,13 @@ export async function POST(request: Request) {
     }
 
     if (action === "add") {
+      // 確保使用者存在，以避免 Foreign Key 錯誤
+      await prisma.user.upsert({
+        where: { email: user_email },
+        update: {},
+        create: { email: user_email },
+      });
+
       // 確保 PlaceInfo 存在並更新快照資訊
       await prisma.placeInfo.upsert({
         where: { place_id },
