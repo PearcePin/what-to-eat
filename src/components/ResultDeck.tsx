@@ -16,17 +16,117 @@ const Tag = ({ color, bg, border, children }: any) => (
   </span>
 );
 
-export default function ResultDeck({ filters, location }: { filters: any; location: Location }) {
+export default function ResultDeck({ filters, location, user, isGuest, isFavMode }: { filters: any; location: Location; user: any; isGuest: boolean; isFavMode?: boolean }) {
   const [loading, setLoading] = useState(true);
   const [places, setPlaces] = useState<any[]>([]);
   const [error, setError] = useState("");
   const [isSpinning, setIsSpinning] = useState(false);
   const [selectedPlace, setSelectedPlace] = useState<any>(null);
   const [feedbackPlace, setFeedbackPlace] = useState<any>(null);
+  const [userFavorites, setUserFavorites] = useState<string[]>([]); // 儲存 place_id 列表
 
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+  const isRoutingRef = useRef(false); // 避免重複觸發
 
-  useEffect(() => { fetchPlaces(); }, [filters]);
+  useEffect(() => {
+    if (isFavMode) fetchFavRoulette();
+    else fetchPlaces();
+    if (user) fetchFavorites();
+  }, [filters, isFavMode]);
+
+  const getDistance = (lat1: number, lng1: number, lat2: number, lng2: number) => {
+    const R = 6371; // km
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLng = (lng2 - lng1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+      Math.sin(dLng / 2) * Math.sin(dLng / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+  };
+
+  const fetchFavRoulette = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/favorites?email=${user.email}`);
+      const data = await res.json();
+      if (data.success) {
+        // 過濾 10km 內的店
+        // 註：placeInfo 需要經緯度，如果當初儲存時沒存，這裡會抓不到。
+        // 但目前 PlaceInfo 只有 place_id。我們需要從 Google 補抓經緯度，
+        // 或者在搜尋結果時就先把經緯度存進 PlaceInfo。
+        // 目前我們先假設 place 結果包含距離資訊 (從 API 吐回來的)
+        // 或者是我們在這裡對每一個 Favorites 呼叫一次 Details (效能較差)
+        // 更好的做法：搜尋時 PlaceInfo 已經快照了經緯度。
+
+        // 過濾 10km 內的店
+        const favs = data.favorites
+          .map((f: any) => f.place)
+          .filter((p: any) => {
+            if (!p.lat || !p.lng) return true; // 如果沒存到經緯度，就假設可以抽
+            const dist = getDistance(location.lat, location.lng, p.lat, p.lng);
+            return dist <= 10;
+          })
+          .map((p: any) => ({
+            ...p,
+            id: p.place_id,
+            photoRef: p.photo_ref,
+            finalScore: p.avg_user_rating > 0 ? p.avg_user_rating.toFixed(1) : "–",
+            distanceText: p.lat ? `${getDistance(location.lat, location.lng, p.lat, p.lng).toFixed(1)} km` : null
+          }));
+
+        if (favs.length === 0) {
+          setError("10公里內沒有找到您的收藏店家喔！");
+        } else {
+          setPlaces(favs);
+          // 自動開始轉盤
+          setTimeout(() => handleRoulette(), 500);
+        }
+      }
+    } catch { setError("讀取收藏失敗"); }
+    finally { setLoading(false); }
+  };
+
+  const fetchFavorites = async () => {
+    try {
+      const res = await fetch(`/api/favorites?email=${user.email}`);
+      const data = await res.json();
+      if (data.success) setUserFavorites(data.favorites.map((f: any) => f.place_id));
+    } catch (e) { console.error("Fetch favs error", e); }
+  };
+
+  const toggleFavorite = async (place: any) => {
+    if (isGuest) {
+      alert("請登入後再使用收藏功能！✨");
+      return;
+    }
+    const isFav = userFavorites.includes(place.id);
+    const action = isFav ? "remove" : "add";
+
+    // Optimistic UI update
+    if (isFav) setUserFavorites(prev => prev.filter(id => id !== place.id));
+    else setUserFavorites(prev => [...prev, place.id]);
+
+    try {
+      await fetch("/api/favorites", {
+        method: "POST",
+        body: JSON.stringify({
+          user_email: user.email,
+          place_id: place.id,
+          action,
+          name: place.name,
+          address: place.address,
+          lat: place.location?.lat,
+          lng: place.location?.lng,
+          photo_ref: place.photoRef
+        }),
+      });
+    } catch (e) {
+      console.error("Toggle fav error", e);
+      fetchFavorites();
+    }
+  };
 
   const fetchPlaces = async () => {
     setLoading(true);
@@ -142,6 +242,22 @@ export default function ResultDeck({ filters, location }: { filters: any; locati
                   }}>
                     ⭐ {place.finalScore}
                   </div>
+                  {/* 收藏按鈕 */}
+                  <button
+                    onClick={(e) => { e.stopPropagation(); toggleFavorite(place); }}
+                    style={{
+                      position: "absolute", top: "12px", right: "12px",
+                      background: "rgba(255,255,255,0.85)", backdropFilter: "blur(8px)",
+                      border: "none", width: "36px", height: "36px", borderRadius: "50%",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      cursor: "pointer", fontSize: "1.2rem", transition: "transform 0.2s",
+                      boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
+                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.transform = "scale(1.1)"}
+                    onMouseLeave={(e) => e.currentTarget.style.transform = "scale(1)"}
+                  >
+                    {userFavorites.includes(place.id) ? "❤️" : "🤍"}
+                  </button>
                 </div>
               ) : (
                 <div style={{
@@ -195,7 +311,10 @@ export default function ResultDeck({ filters, location }: { filters: any; locati
                 {/* 按鈕列 */}
                 <div style={{ display: "flex", gap: "8px" }}>
                   <button
-                    onClick={() => setFeedbackPlace(place)}
+                    onClick={() => {
+                      if (isGuest) alert("登入後可以幫餐廳評分，並讓推薦更準確喔！🍰");
+                      else setFeedbackPlace(place);
+                    }}
                     className="btn-primary"
                     style={{ flex: 1, padding: "10px", fontSize: "0.88rem", borderRadius: "12px" }}
                   >

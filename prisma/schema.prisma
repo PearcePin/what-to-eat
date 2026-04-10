@@ -13,17 +13,36 @@ model User {
   email     String   @unique
   name      String?
   logs      Log[]
+  favorites Favorite[]
   createdAt DateTime @default(now())
 }
 
 model PlaceInfo {
   place_id        String       @id
+  name            String?
+  address         String?
+  lat             Float?
+  lng             Float?
+  photo_ref       String?
   avg_user_rating Float        @default(0.0)
   rating_count    Int          @default(0)
   override_price  String?
   override_hours  String?
   reviews         UserReview[]
+  favorites       Favorite[]
   updatedAt       DateTime     @updatedAt
+}
+
+model Favorite {
+  id        String   @id @default(uuid())
+  user_email String
+  place_id  String
+  createdAt DateTime @default(now())
+
+  user      User      @relation(fields: [user_email], references: [email])
+  place     PlaceInfo @relation(fields: [place_id], references: [place_id])
+
+  @@unique([user_email, place_id])
 }
 
 model UserReview {

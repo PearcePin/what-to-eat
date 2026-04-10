@@ -1,5 +1,5 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from "firebase/auth";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, Auth } from "firebase/auth";
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -10,25 +10,26 @@ const firebaseConfig = {
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
 };
 
-// 只有在瀏覽器環境且有金鑰時才初始化
-const getFirebase = () => {
-  if (typeof window !== "undefined" && process.env.NEXT_PUBLIC_FIREBASE_API_KEY) {
-    try {
-      const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
-      const auth = getAuth(app);
-      const googleProvider = new GoogleAuthProvider();
-      return { auth, googleProvider };
-    } catch (error) {
-      console.error("Firebase init error:", error);
-    }
-  }
-  return { auth: null, googleProvider: null };
-};
+let app;
+let auth: Auth | undefined;
+let googleProvider: GoogleAuthProvider | undefined;
 
-export const { auth, googleProvider } = getFirebase();
+// 只有在瀏覽器環境執行
+if (typeof window !== "undefined") {
+  if (process.env.NEXT_PUBLIC_FIREBASE_API_KEY) {
+    app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
+    auth = getAuth(app);
+    googleProvider = new GoogleAuthProvider();
+  }
+}
+
+export { auth, googleProvider };
 
 export const loginWithGoogle = async () => {
-  if (!auth) return;
+  if (!auth || !googleProvider) {
+    console.error("Firebase not initialized");
+    return;
+  }
   try {
     const result = await signInWithPopup(auth, googleProvider);
     return result.user;

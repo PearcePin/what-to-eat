@@ -14,8 +14,10 @@ interface Location { lat: number; lng: number; label: string; }
 export default function Home() {
   const [started, setStarted] = useState(false);
   const [user, setUser] = useState<User | null>(null);
+  const [isGuest, setIsGuest] = useState(false);
   const [location, setLocation] = useState<Location | null>(null);
   const [filters, setFilters] = useState<any>(null);
+  const [isFavMode, setIsFavMode] = useState(false);
 
   useEffect(() => {
     if (!auth) return;
@@ -29,11 +31,11 @@ export default function Home() {
 
   const handleQuizComplete = (finalFilters: any) => setFilters(finalFilters);
 
-  const showLanding  = !started && !user;
-  const showLogin    = started && !user;
-  const showLocation = !!user && !location;
-  const showQuiz     = !!user && !!location && !filters;
-  const showResults  = !!user && !!location && !!filters;
+  const showLanding  = !started && !user && !isGuest;
+  const showLogin    = started && !user && !isGuest;
+  const showLocation = (!!user || isGuest) && !location;
+  const showQuiz     = (!!user || isGuest) && !!location && !filters && !isFavMode;
+  const showResults  = (!!user || isGuest) && !!location && (!!filters || isFavMode);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", paddingTop: "2rem" }}>
@@ -64,7 +66,7 @@ export default function Home() {
             登入後可以幫餐廳評分，讓推薦更準確
           </p>
           <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
-            <button className="btn-secondary" onClick={() => setStarted(false)}>取消</button>
+            <button className="btn-secondary" onClick={() => setIsGuest(true)}>訪客繼續</button>
             <button className="btn-primary" onClick={handleLogin}>Google 登入</button>
           </div>
         </div>
@@ -73,36 +75,45 @@ export default function Home() {
       {/* 定位選擇 */}
       {showLocation && <LocationPicker onConfirm={(loc) => setLocation(loc)} />}
 
+      {/* 模式選擇 (定位後) */}
+      {!!user && !!location && !filters && !isFavMode && (
+        <div style={{ marginBottom: "1.5rem", display: "flex", gap: "10px", animation: "fadeIn 0.5s ease" }}>
+          <button className="btn-secondary" onClick={() => setIsFavMode(true)} style={{ padding: "10px 20px" }}>
+            🎯 抽收藏店家
+          </button>
+          <div style={{ width: "1px", background: "rgba(0,0,0,0.1)" }} />
+          <p style={{ alignSelf: "center", margin: 0, fontSize: "0.85rem", color: "var(--text-light)" }}>或開始問卷推薦</p>
+        </div>
+      )}
+
       {/* 問卷 */}
       {showQuiz && <Quiz user={user!} onComplete={handleQuizComplete} />}
 
       {/* 結果 */}
-      {showResults && <ResultDeck filters={filters} location={location!} />}
+      {showResults && <ResultDeck filters={filters} location={location!} user={user} isGuest={isGuest} isFavMode={isFavMode} />}
 
       {/* 位置標示 */}
       {user && location && (
         <p style={{ marginTop: "1rem", fontSize: "0.78rem", color: "var(--text-light)" }}>
-          {location.label}
-          {!filters && (
+          {filters || isFavMode ? (
+            <button onClick={() => { setLocation(null); setFilters(null); setIsFavMode(false); }}
+              style={{ marginLeft: "8px", color: "var(--primary)", background: "none", border: "none", cursor: "pointer", fontSize: "0.78rem", textDecoration: "underline", fontFamily: "inherit" }}>
+              重新搜尋
+            </button>
+          ) : (
             <button onClick={() => setLocation(null)}
               style={{ marginLeft: "8px", color: "var(--primary)", background: "none", border: "none", cursor: "pointer", fontSize: "0.78rem", textDecoration: "underline", fontFamily: "inherit" }}>
               重選
             </button>
           )}
-          {filters && (
-            <button onClick={() => { setLocation(null); setFilters(null); }}
-              style={{ marginLeft: "8px", color: "var(--primary)", background: "none", border: "none", cursor: "pointer", fontSize: "0.78rem", textDecoration: "underline", fontFamily: "inherit" }}>
-              重新搜尋
-            </button>
-          )}
         </p>
       )}
 
-      {/* 登出 */}
-      {user && (
-        <button onClick={() => { logout(); setLocation(null); setFilters(null); }}
+      {/* 登出 / 訪客結束 */}
+      {(user || isGuest) && (
+        <button onClick={() => { logout(); setUser(null); setIsGuest(false); setLocation(null); setFilters(null); }}
           style={{ marginTop: "0.8rem", color: "var(--text-light)", background: "none", border: "none", cursor: "pointer", fontSize: "0.75rem", textDecoration: "underline", fontFamily: "inherit" }}>
-          登出 {user.email}
+          {user ? `登出 ${user.email}` : "結束訪客模式"}
         </button>
       )}
     </div>
