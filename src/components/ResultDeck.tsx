@@ -172,10 +172,10 @@ export default function ResultDeck({ filters, location, user, isGuest, isFavMode
     ref && apiKey ? `https://maps.googleapis.com/maps/api/place/photo?maxwidth=600&photo_reference=${ref}&key=${apiKey}` : null;
 
   const getPriceLabel = (level: number | null) => {
-    if (level === 1) return "💰 ~$200";
-    if (level === 2) return "💰💰 $200-400";
-    if (level === 3) return "💰💰💰 $400-800";
-    if (level && level >= 4) return "💰💰💰💰 $800+";
+    if (level === 1) return "💰 < $200";
+    if (level === 2) return "💰💰 $200-500";
+    if (level === 3) return "💰💰💰 $500-1,000";
+    if (level && level >= 4) return "💰💰💰💰 $1,000+";
     return null;
   };
 
