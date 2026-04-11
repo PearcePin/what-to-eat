@@ -59,49 +59,55 @@ export async function GET(request: Request) {
   const pageToken = searchParams.get("pagetoken");
 
   try {
-    // 1. 使用 Google Places API (New) - Search Text
     const url = "https://places.googleapis.com/v1/places:searchText";
-    
-    const body: any = {
-      textQuery: combinedQuery,
-      includedType: includedType, 
-      locationBias: {
-        circle: {
-          center: { latitude: lat, longitude: lng },
-          radius: radius
-        }
-      },
-      languageCode: "zh-TW",
-      maxResultCount: 20
+    const headers = {
+      "Content-Type": "application/json",
+      "X-Goog-Api-Key": apiKey,
+      "X-Goog-FieldMask": "nextPageToken,places.id,places.displayName,places.formattedAddress,places.rating,places.priceLevel,places.priceRange,places.regularOpeningHours,places.photos,places.location,places.types"
     };
 
-    if (pageToken) {
-      body.pageToken = pageToken;
-    }
+    let allGooglePlaces: any[] = [];
+    let currentToken: string | null = pageToken;
+    let pagesFetched = 0;
+    const MAX_PAGES = 3; // 連續抓取 3 頁，建構 60 家店的大池子
 
-    const res = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Goog-Api-Key": apiKey,
-        "X-Goog-FieldMask": "nextPageToken,places.id,places.displayName,places.formattedAddress,places.rating,places.priceLevel,places.priceRange,places.regularOpeningHours,places.photos,places.location,places.types"
-      },
-      body: JSON.stringify(body)
-    });
+    // --- 連續抓取大池子邏輯 ---
+    do {
+      const body: any = {
+        textQuery: combinedQuery,
+        includedType: includedType,
+        locationBias: {
+          circle: {
+            center: { latitude: lat, longitude: lng },
+            radius: radius
+          }
+        },
+        languageCode: "zh-TW",
+        maxResultCount: 20
+      };
+      if (currentToken) body.pageToken = currentToken;
 
-    const data = await res.json();
+      const res = await fetch(url, { method: "POST", headers, body: JSON.stringify(body) });
+      const data = await res.json();
+      
+      if (data.places) allGooglePlaces = allGooglePlaces.concat(data.places);
+      currentToken = data.nextPageToken || null;
+      pagesFetched++;
 
-    if (!data.places) {
+      // 如果已經抓夠 60 筆、或者沒下頁了、或者這是分頁請求(只抓一頁新的)，就跳出
+    } while (currentToken && pagesFetched < MAX_PAGES && !pageToken);
+
+    if (allGooglePlaces.length === 0) {
       return NextResponse.json({ success: true, results: [] });
     }
 
     // 2. 查詢社群推薦標記
-    const placeIds = data.places.map((p: any) => p.id);
+    const placeIds = allGooglePlaces.map((p: any) => p.id);
     const overrides = await prisma.placeInfo.findMany({ where: { place_id: { in: placeIds } } });
     const overrideMap = new Map(overrides.map(o => [o.place_id, o]));
 
     // 3. 組裝結果
-    let recommendations = data.places.map((place: any) => {
+    let recommendations = allGooglePlaces.map((place: any) => {
       const gRating = place.rating || 0;
       const isCommunityRecommended = overrideMap.has(place.id) && (overrideMap.get(place.id)!.avg_user_rating > 0);
       const overrideData = overrideMap.get(place.id) ? { price: overrideMap.get(place.id)!.override_price, hours: overrideMap.get(place.id)!.override_hours } : null;
@@ -137,10 +143,34 @@ export async function GET(request: Request) {
       };
     });
 
-    // 嚴格過濾距離
-    recommendations = recommendations.filter((p: any) => p.distance <= radius * 1.1);
+    // 4. 過濾與排序 (在地化優化：距離加權與營業時間顯示)
+    // 即使超過半徑也暫時保留一些候選，但權重降低
+    const openPriority = (p: any) => p.openNow === true ? 0 : p.openNow === null ? 1 : 2;
+    
+    recommendations.sort((a, b) => {
+      // 第一優先：營業中 > 未知 > 已歇業
+      const op = openPriority(a) - openPriority(b);
+      if (op !== 0) return op;
 
-    // 4. 預算過濾
+      // 第二優先：距離權重 (Proximity Boost)
+      // 離使用者越近得分越高。 500m 內加 3 分, 1km 內加 1.5 分
+      const boostA = a.distance < 1000 ? (1000 - a.distance) / 333 : 0;
+      const boostB = b.distance < 1000 ? (1000 - b.distance) / 333 : 0;
+
+      // 最終分數 = Google 評分 + 距離加成 + 小幅隨機擾動
+      const scoreA = a.finalScore + boostA + (Math.random() * 0.4 - 0.2);
+      const scoreB = b.finalScore + boostB + (Math.random() * 0.4 - 0.2);
+      return scoreB - scoreA;
+    });
+
+    // 最後才切距離
+    let filteredResults = recommendations.filter((p: any) => {
+       // 如果是步行(1km)，給予 1.3km 的緩衝；其他給予 1.2 倍緩衝
+       const buffer = radius <= 1000 ? 1.3 : 1.2;
+       return p.distance <= radius * buffer;
+    });
+
+    // 5. 預算過濾 (Restore missing logic)
     if (budget && !budget.includes("今天不談錢的事")) {
       let minL = 1, maxL = 4;
       if (budget.includes("100元以下")) { minL = 1; maxL = 1; }
@@ -148,35 +178,18 @@ export async function GET(request: Request) {
       else if (budget.includes("300–600")) { minL = 2; maxL = 3; }
       else if (budget.includes("600元以上")) { minL = 3; maxL = 4; }
 
-      recommendations = recommendations.filter((p: any) => {
+      filteredResults = filteredResults.filter((p: any) => {
         if (!p.priceLevel) return false;
         return p.priceLevel >= minL && p.priceLevel <= maxL;
       });
     }
 
-    // 5. 排序與隨機化 (在地化優化：距離加權)
-    const openPriority = (p: any) => p.openNow === true ? 0 : p.openNow === null ? 1 : 2;
-    
-    recommendations.sort((a, b) => {
-      const op = openPriority(a) - openPriority(b);
-      if (op !== 0) return op;
-
-      // 距離加權邏輯 (Proximity Boost)
-      // 在 300 公尺內的店家，分數補償 +1.5~+2.0 分
-      // 這樣可以確保「旁邊的店」即便評分稍低，也會排在最前面
-      const boostA = a.distance < 300 ? (300 - a.distance) / 100 : 0;
-      const boostB = b.distance < 300 ? (300 - b.distance) / 100 : 0;
-
-      const scoreA = a.finalScore + boostA + (Math.random() * 0.8 - 0.4);
-      const scoreB = b.finalScore + boostB + (Math.random() * 0.8 - 0.4);
-      return scoreB - scoreA;
-    });
-
     return NextResponse.json({
       success: true,
-      results: recommendations.slice(0, 10),
-      nextPageToken: data.nextPageToken || null,
+      results: filteredResults.slice(0, 10),
+      nextPageToken: currentToken,
     });
+
   } catch (error: any) {
     console.error("New Search API Error:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
