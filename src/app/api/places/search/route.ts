@@ -33,12 +33,14 @@ export async function GET(request: Request) {
   const meal = clean(rawMeal); // e.g. "早餐", "午餐", "消夜"
   const type = clean(rawType); // e.g. "火鍋", "日式/壽司"
 
-  // 搜尋關鍵字優化：針對「早餐」擴大搜尋範圍，確保早午餐/Brunch 都能抓到
+  // 搜尋關鍵字優化：使用最直接的在地關鍵字
   let textQuery = [meal, type].filter(Boolean).join(" ") || "餐廳";
   if (meal === "早餐") {
-    textQuery = `早餐店 早午餐 ${type}`.trim();
+    textQuery = `早餐店 ${type}`.trim();
+  } else if (meal === "消夜") {
+    textQuery = `宵夜 ${type}`.trim();
   } else if (meal === "點心") {
-    textQuery = `甜點 咖啡廳 飲料店 ${type}`.trim();
+    textQuery = `甜點 咖啡廳 ${type}`.trim();
   }
 
   const apiKey = process.env.GOOGLE_MAPS_API_KEY || process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
