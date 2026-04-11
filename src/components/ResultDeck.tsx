@@ -171,6 +171,14 @@ export default function ResultDeck({ filters, location, user, isGuest, isFavMode
   const getPhotoUrl = (ref: string | null) =>
     ref && apiKey ? `https://maps.googleapis.com/maps/api/place/photo?maxwidth=600&photo_reference=${ref}&key=${apiKey}` : null;
 
+  const getPriceLabel = (level: number | null) => {
+    if (level === 1) return "💰 便宜";
+    if (level === 2) return "💰💰 中等";
+    if (level === 3) return "💰💰💰 偏貴";
+    if (level && level >= 4) return "💰💰💰💰 高級";
+    return null;
+  };
+
   /* ──── 載入中 ──── */
   if (loading) return (
     <div className="glass-panel" style={{ textAlign: "center", padding: "2.5rem" }}>
@@ -292,6 +300,7 @@ export default function ResultDeck({ filters, location, user, isGuest, isFavMode
                 <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", marginBottom: "0.9rem" }}>
                   {place.openNow === true  && <Tag color="#3DAA80" bg="rgba(157,219,192,0.25)" border="rgba(157,219,192,0.6)">🟢 開業中</Tag>}
                   {place.openNow === false && <Tag color="#E07080" bg="rgba(255,182,193,0.25)" border="rgba(255,182,193,0.6)">🔴 已打烊</Tag>}
+                  {place.priceLevel != null && <Tag color="#B08030" bg="rgba(240,225,200,0.4)" border="rgba(240,220,180,0.8)">{getPriceLabel(place.priceLevel)}</Tag>}
                   {place.distanceText     && <Tag color="#C07030" bg="rgba(255,210,176,0.3)"  border="rgba(255,210,176,0.7)">🚶 {place.distanceText}</Tag>}
                   <Tag color="var(--text-secondary)" bg="rgba(0,0,0,0.04)" border="rgba(0,0,0,0.08)">Google ⭐ {place.rating ?? "–"}</Tag>
                   {place.isCommunityRecommended && <Tag color="#5A7FD0" bg="rgba(163,204,224,0.25)" border="rgba(163,204,224,0.6)">✦ 社群推薦</Tag>}

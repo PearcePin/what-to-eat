@@ -134,7 +134,7 @@ export async function GET(request: Request) {
 
     // 預算過濾 (保留沒有 price_level 的餐廳，避免漏掉小吃店)
     const budget = searchParams.get("budget");
-    if (budget) {
+    if (budget && !budget.includes("今天不談錢的事")) {
       let minAllowed = 0;
       let maxAllowed = 4;
       if (budget.includes("100元以下")) maxAllowed = 1;
