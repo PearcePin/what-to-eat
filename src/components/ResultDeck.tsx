@@ -138,12 +138,12 @@ export default function ResultDeck({ filters, location, user, isGuest, isFavMode
     setLoading(true);
     setSelectedPlace(null);
     let radius = "1000";
-    if (filters.transport.includes("腳踏車")) radius = "3000";
-    if (filters.transport.includes("汽機車")) radius = "5000";
+    if (filters?.transport?.includes("腳踏車")) radius = "3000";
+    if (filters?.transport?.includes("汽機車")) radius = "5000";
     
     try {
       const url = useToken 
-        ? `/api/places/search?pagetoken=${nextPageToken}&lat=${location.lat}&lng=${location.lng}&budget=${encodeURIComponent(filters?.budget || "")}&meal=${encodeURIComponent(filters?.meal || "")}` 
+        ? `/api/places/search?pagetoken=${nextPageToken}&lat=${location.lat}&lng=${location.lng}&budget=${encodeURIComponent(filters?.budget || "")}&meal=${encodeURIComponent(filters?.meal || "")}&type=${encodeURIComponent(filters?.type || "")}&radius=${radius}` 
         : `/api/places/search?type=${encodeURIComponent(filters?.type || "")}&radius=${radius}&lat=${location.lat}&lng=${location.lng}&budget=${encodeURIComponent(filters?.budget || "")}&meal=${encodeURIComponent(filters?.meal || "")}`;
 
       const res = await fetch(url);

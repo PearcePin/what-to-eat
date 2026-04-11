@@ -177,13 +177,6 @@ export async function GET(request: Request) {
       results: recommendations.slice(0, 10),
       nextPageToken: data.nextPageToken || null,
     });
-
-    return NextResponse.json({
-      success: true,
-      results: recommendations.slice(0, 10),
-      nextPageToken: data.nextPageToken || null,
-    });
-
   } catch (error: any) {
     console.error("New Search API Error:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
