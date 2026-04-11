@@ -68,9 +68,9 @@ export async function GET(request: Request) {
     do {
       const body: any = {
         textQuery: combinedQuery,
-        includedType: "restaurant",
-        // 使用 locationRestriction：Google 被強制只回傳這個圓圈範圍內的店家
-        // 不再會出現 10 公里外的殭屍推薦
+        // 不設 includedType：讓 Google 依關鍵字自由搜尋
+        // 原因：台灣許多早餐店、速食店在 Google 被分類為 meal_takeaway / food
+        // 而非 restaurant，強制設為 restaurant 會漏掉麥味登、美而美等大量店家
         locationRestriction: {
           circle: {
             center: { latitude: lat, longitude: lng },
