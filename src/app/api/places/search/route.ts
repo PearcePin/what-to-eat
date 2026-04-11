@@ -49,7 +49,7 @@ export async function GET(request: Request) {
         }
       },
       languageCode: "zh-TW",
-      maxResultCount: 15
+      maxResultCount: 20
     };
 
     if (pageToken) {
@@ -129,6 +129,14 @@ export async function GET(request: Request) {
         priceRange: place.priceRange || null,
         overrideData,
       };
+    });
+
+    // 嚴格過濾距離 (解決 Google API locationBias 可能跑太遠的問題)
+    recommendations = recommendations.filter((p: any) => {
+      // 如果無法計算距離，暫且保留，但如果有距離就必須在範圍內
+      if (p.distance === null) return true;
+      // 緩衝區設為 radius 的 1.1 倍，避免邊緣判定過嚴
+      return p.distance <= radius * 1.1;
     });
 
     // 4. 預算過濾
