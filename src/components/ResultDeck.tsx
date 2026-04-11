@@ -145,13 +145,14 @@ export default function ResultDeck({ filters, location, user, isGuest, isFavMode
       const res = await fetch(url);
       const data = await res.json();
       if (data.success) {
-        if (data.results.length === 0) {
+        const deck = data.deck || [];
+        if (deck.length === 0) {
           setError("範圍內沒有找到符合條件的店家，試試放寬距離或調整條件吧！");
         } else {
-          // 存入大池子（allResults 包含所有找到的店家）
-          const pool = data.allResults || data.results;
-          setAllResultsPool(pool);
-          setPlaces(pool.slice(0, 10));
+          setAllResultsPool(deck); // 整副牌
+          // 隨機從牌庫抽 10 張顯示
+          const hand = [...deck].sort(() => Math.random() - 0.5).slice(0, 10);
+          setPlaces(hand);
           setNextPageToken(null);
           setError("");
         }
@@ -160,30 +161,23 @@ export default function ResultDeck({ filters, location, user, isGuest, isFavMode
     finally { setLoading(false); }
   };
 
-  // 換一批：從本地大池子裡取下一個 10 筆，不需要打 API
+  // 換批：從整副牌重新隨機抽 10 張（允許重複，每次都是新鮮感）
   const changeBatch = () => {
     if (!allResultsPool.length) return;
-    const nextOffset = poolOffset + 10;
-    if (nextOffset >= allResultsPool.length) {
-      // 池子已用完，重新洗牌後從頭再來
-      const shuffled = [...allResultsPool].sort(() => Math.random() - 0.5);
-      setAllResultsPool(shuffled);
-      setPoolOffset(0);
-      setPlaces(shuffled.slice(0, 10));
-    } else {
-      setPoolOffset(nextOffset);
-      setPlaces(allResultsPool.slice(nextOffset, nextOffset + 10));
-    }
+    const hand = [...allResultsPool].sort(() => Math.random() - 0.5).slice(0, 10);
+    setPlaces(hand);
     setSelectedPlace(null);
   };
 
+  // 命運決定：從整副牌裡隨機抽 1 張
   const handleRoulette = () => {
-    if (!places.length) return;
+    const pool = allResultsPool.length > 0 ? allResultsPool : places;
+    if (!pool.length) return;
     setIsSpinning(true);
     setSelectedPlace(null);
     let count = 0;
     const iv = setInterval(() => {
-      setSelectedPlace(places[Math.floor(Math.random() * places.length)]);
+      setSelectedPlace(pool[Math.floor(Math.random() * pool.length)]);
       if (++count > 20) { clearInterval(iv); setIsSpinning(false); }
     }, 100);
   };
