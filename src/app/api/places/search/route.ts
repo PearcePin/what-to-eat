@@ -54,41 +54,47 @@ export async function GET(request: Request) {
       "X-Goog-FieldMask": "nextPageToken,places.id,places.displayName,places.formattedAddress,places.rating,places.priceLevel,places.priceRange,places.regularOpeningHours,places.photos,places.location"
     };
 
-    let allPlaces: any[] = [];
-    let pageToken: string | null = null;
-    let pagesFetched = 0;
-    const MAX_PAGES = 5;
+    // 擴大搜尋母體：同時發送兩個不同的關鍵字請求，以突破單次搜尋 60 筆的限制
+    const queries = [textQuery];
+    if (meal === "早餐") queries.push("早午餐");
+    else if (meal === "消夜") queries.push("深夜食堂");
+    else if (meal !== "餐廳") queries.push(meal);
 
-    // 擴大搜尋母體：使用 locationBias 搜尋 3 倍半徑 (至多 5km)，確保 Google 能抓到足夠候選名單
-    const biasRadius = Math.min(radius * 3, 5000);
+    const fetchUniquePlaces = async (query: string) => {
+      let places: any[] = [];
+      let pageToken: string | null = null;
+      let pagesFetched = 0;
+      const biasRadius = Math.min(radius * 3, 5000);
 
-    do {
-      const body: any = {
-        textQuery,
-        locationBias: {
-          circle: {
-            center: { latitude: lat, longitude: lng },
-            radius: biasRadius
-          }
-        },
-        languageCode: "zh-TW",
-        maxResultCount: 20
-      };
-      if (pageToken) body.pageToken = pageToken;
+      do {
+        const body: any = {
+          textQuery: query,
+          locationBias: {
+            circle: { center: { latitude: lat, longitude: lng }, radius: biasRadius }
+          },
+          languageCode: "zh-TW",
+          maxResultCount: 20
+        };
+        if (pageToken) body.pageToken = pageToken;
 
-      const res = await fetch(url, { method: "POST", headers, body: JSON.stringify(body) });
-      const data = await res.json();
+        const res = await fetch(url, { method: "POST", headers, body: JSON.stringify(body) });
+        const data = await res.json();
+        if (data.places) places = places.concat(data.places);
+        pageToken = data.nextPageToken || null;
+        pagesFetched++;
+      } while (pageToken && pagesFetched < 3);
+      return places;
+    };
 
-      if (data.places) allPlaces = allPlaces.concat(data.places);
-      pageToken = data.nextPageToken || null;
-      pagesFetched++;
-    } while (pageToken && pagesFetched < MAX_PAGES);
+    // 並行執行所有搜尋請求
+    const resultsArray = await Promise.all(queries.map(q => fetchUniquePlaces(q)));
+    let allPlaces = resultsArray.flat();
 
     if (allPlaces.length === 0) {
       return NextResponse.json({ success: true, deck: [] });
     }
 
-    // 去重
+    // 去重 (重複的 Place ID 只保留一個)
     const seen = new Set<string>();
     allPlaces = allPlaces.filter(p => {
       if (seen.has(p.id)) return false;
@@ -138,44 +144,25 @@ export async function GET(request: Request) {
       };
     });
 
-    // ==========================================
-    // 關鍵步：廣抓精篩 (Filter Tight)
-    // 雖然搜尋 3km，但我們手動過濾，只回傳 radius 內的店家
-    // ==========================================
+    // 嚴格距離與預算過濾
     deck = deck.filter(p => p.distance <= radius);
 
-    if (deck.length === 0) {
-      return NextResponse.json({ success: true, deck: [] });
-    }
-
-    // 預算過濾
     if (budget && !budget.includes("今天不談錢的事")) {
       const minL = budget.includes("100元以下") ? 1 : budget.includes("100–300") ? 1 : budget.includes("300–600") ? 2 : 3;
       const maxL = budget.includes("100元以下") ? 1 : budget.includes("100–300") ? 2 : budget.includes("300–600") ? 3 : 4;
-      deck = deck.filter(p => p.priceLevel !== null && p.priceLevel >= minL && p.priceLevel <= maxL);
+      deck = deck.filter(p => !p.priceLevel || (p.priceLevel >= minL && p.priceLevel <= maxL));
     }
 
-    // ==========================================
-    // 精準排序演算法：距離與營業狀態平衡
-    // ==========================================
+    // 距離優先排序
     deck.sort((a, b) => {
-      // 1. 先計算「距離加分」
-      // 300m 內 +10 分, 500m 內 +5 分, 1km 內 +2 分
-      const distScore = (d: number) => d < 300 ? 10 : d < 500 ? 5 : d < 1000 ? 2 : 0;
-      
-      // 2. 營業狀態
-      const openScore = (open: boolean | null) => open === true ? 5 : open === null ? 2 : 0;
-
+      const distScore = (d: number) => d < 100 ? 50 : d < 300 ? 30 : d < 500 ? 20 : d < 1000 ? 10 : 0;
+      const openScore = (open: boolean | null) => open === true ? 5 : 0;
       const scoreA = (a.rating || 0) + distScore(a.distance) + openScore(a.openNow) + (Math.random() * 0.5);
       const scoreB = (b.rating || 0) + distScore(b.distance) + openScore(b.openNow) + (Math.random() * 0.5);
-
       return scoreB - scoreA;
     });
 
-    return NextResponse.json({
-      success: true,
-      deck, // 整副牌，前端自己決定要抽幾張
-    });
+    return NextResponse.json({ success: true, deck });
 
   } catch (error: any) {
     console.error("Search API Error:", error);

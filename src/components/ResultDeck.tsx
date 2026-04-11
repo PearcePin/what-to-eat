@@ -369,7 +369,7 @@ export default function ResultDeck({ filters, location, user, isGuest, isFavMode
       {/* 標題列 */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.2rem" }}>
         <h3 style={{ margin: 0, fontSize: "1.1rem", color: "var(--text)" }}>
-          {isViewFavMode ? "📜 我的收藏清單" : "🍴 附近推薦"}
+          {isViewFavMode ? "📜 我的收藏清單" : `🍴 附近推薦 (${allResultsPool.length} 個結果)`}
         </h3>
         {!selectedPlace && !isViewFavMode && !isFavMode && (
           <button className="btn-secondary" style={{ padding: "6px 16px", fontSize: "0.82rem" }} onClick={changeBatch}>
