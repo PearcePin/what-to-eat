@@ -36,16 +36,15 @@ export async function GET(request: Request) {
   const meal = clean(rawMeal);
   const type = clean(rawType);
 
-  // 2. 智慧映射：將餐次映射到 Google 官方類別 (includedType)
-  // 這能極大化提升精準度，過濾掉藥局、超商等非餐廳結果
+  // 2. 智慧映射：放寬類別過濾，改用包含性最強的 "restaurant"
+  // 並搭配精確關鍵字，避免因為 Google 標註不完全而漏掉在地店面 (特別是早餐店)
   let includedType = "restaurant"; 
   let optimizedMeal = meal;
 
   if (meal === "早餐") {
-    includedType = "breakfast_restaurant";
     optimizedMeal = "早餐店";
   } else if (meal === "點心") {
-    includedType = "dessert_shop"; // 或 "cafe"
+    optimizedMeal = "甜點 咖啡廳";
   } else if (meal === "消夜") {
     optimizedMeal = "宵夜";
   }
@@ -65,7 +64,7 @@ export async function GET(request: Request) {
     
     const body: any = {
       textQuery: combinedQuery,
-      includedType: includedType, // 強制度過濾非相關類別
+      includedType: includedType, 
       locationBias: {
         circle: {
           center: { latitude: lat, longitude: lng },
@@ -96,7 +95,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ success: true, results: [] });
     }
 
-    // 2. 查詢社群推薦標記 (僅用於顯示，不影響排名)
+    // 2. 查詢社群推薦標記
     const placeIds = data.places.map((p: any) => p.id);
     const overrides = await prisma.placeInfo.findMany({ where: { place_id: { in: placeIds } } });
     const overrideMap = new Map(overrides.map(o => [o.place_id, o]));
@@ -107,17 +106,13 @@ export async function GET(request: Request) {
       const isCommunityRecommended = overrideMap.has(place.id) && (overrideMap.get(place.id)!.avg_user_rating > 0);
       const overrideData = overrideMap.get(place.id) ? { price: overrideMap.get(place.id)!.override_price, hours: overrideMap.get(place.id)!.override_hours } : null;
 
-      // 新版 API 的營業時間
       const openNow = place.regularOpeningHours?.openNow ?? null;
       const todayHours = place.regularOpeningHours?.weekdayDescriptions?.[new Date().getDay() === 0 ? 6 : new Date().getDay() - 1] ?? null;
-
-      // 社群修正時間優先
       const displayHours: string | null = overrideData?.hours || todayHours;
 
-      // 計算距離
       const pLat = place.location?.latitude;
       const pLng = place.location?.longitude;
-      const distMeters = (pLat && pLng) ? haversineDistance(lat, lng, pLat, pLng) : null;
+      const distMeters = (pLat && pLng) ? haversineDistance(lat, lng, pLat, pLng) : 0;
 
       return {
         id: place.id,
@@ -143,10 +138,7 @@ export async function GET(request: Request) {
     });
 
     // 嚴格過濾距離
-    recommendations = recommendations.filter((p: any) => {
-      if (p.distance === null) return true;
-      return p.distance <= radius * 1.1;
-    });
+    recommendations = recommendations.filter((p: any) => p.distance <= radius * 1.1);
 
     // 4. 預算過濾
     if (budget && !budget.includes("今天不談錢的事")) {
@@ -162,18 +154,28 @@ export async function GET(request: Request) {
       });
     }
 
-    // 5. 排序與隨機化 (Variety 優化)
+    // 5. 排序與隨機化 (在地化優化：距離加權)
     const openPriority = (p: any) => p.openNow === true ? 0 : p.openNow === null ? 1 : 2;
     
     recommendations.sort((a, b) => {
       const op = openPriority(a) - openPriority(b);
       if (op !== 0) return op;
 
-      // 調低隨機干擾幅度 (±0.5)，確保「相關度越高、評分越好」的店首選出現
-      // 但仍保留一點換一批的味道
-      const randomA = a.finalScore + (Math.random() * 1.0 - 0.5);
-      const randomB = b.finalScore + (Math.random() * 1.0 - 0.5);
-      return randomB - randomA;
+      // 距離加權邏輯 (Proximity Boost)
+      // 在 300 公尺內的店家，分數補償 +1.5~+2.0 分
+      // 這樣可以確保「旁邊的店」即便評分稍低，也會排在最前面
+      const boostA = a.distance < 300 ? (300 - a.distance) / 100 : 0;
+      const boostB = b.distance < 300 ? (300 - b.distance) / 100 : 0;
+
+      const scoreA = a.finalScore + boostA + (Math.random() * 0.8 - 0.4);
+      const scoreB = b.finalScore + boostB + (Math.random() * 0.8 - 0.4);
+      return scoreB - scoreA;
+    });
+
+    return NextResponse.json({
+      success: true,
+      results: recommendations.slice(0, 10),
+      nextPageToken: data.nextPageToken || null,
     });
 
     return NextResponse.json({
