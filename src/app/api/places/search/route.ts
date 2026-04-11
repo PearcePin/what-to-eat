@@ -129,10 +129,10 @@ export async function GET(request: Request) {
     // 4. 預算過濾
     if (budget && !budget.includes("今天不談錢的事")) {
       let minL = 1, maxL = 4;
-      if (budget.startsWith("$ ")) { minL = 1; maxL = 1; }
-      else if (budget.startsWith("$$ ")) { minL = 2; maxL = 2; }
-      else if (budget.startsWith("$$$ ")) { minL = 3; maxL = 3; }
-      else if (budget.startsWith("$$$$ ")) { minL = 4; maxL = 4; }
+      if (budget.includes("100元以下")) { minL = 1; maxL = 1; }
+      else if (budget.includes("100–300")) { minL = 1; maxL = 2; }
+      else if (budget.includes("300–600")) { minL = 2; maxL = 3; }
+      else if (budget.includes("600元以上")) { minL = 3; maxL = 4; }
 
       recommendations = recommendations.filter((p: any) => {
         if (!p.priceLevel) return false;
