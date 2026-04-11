@@ -47,35 +47,55 @@ export async function GET(request: Request) {
       "X-Goog-FieldMask": "nextPageToken,places.id,places.displayName,places.formattedAddress,places.rating,places.priceLevel,places.priceRange,places.regularOpeningHours,places.photos,places.location"
     };
 
-    // 搜尋半徑 = 使用者選的距離 × 1.5，讓 Google 多給候選
-    const searchRadius = radius * 1.5;
+    const fetchPages = async (useRestriction: boolean): Promise<any[]> => {
+      let allPlaces: any[] = [];
+      let pageToken: string | null = null;
+      let pagesFetched = 0;
+      const MAX_PAGES = 5;
 
-    let allPlaces: any[] = [];
-    let pageToken: string | null = null;
-    let pagesFetched = 0;
-    const MAX_PAGES = 5;
+      do {
+        const body: any = {
+          textQuery,
+          languageCode: "zh-TW",
+          maxResultCount: 20
+        };
 
-    do {
-      const body: any = {
-        textQuery,
-        locationBias: {
-          circle: {
-            center: { latitude: lat, longitude: lng },
-            radius: searchRadius
-          }
-        },
-        languageCode: "zh-TW",
-        maxResultCount: 20
-      };
-      if (pageToken) body.pageToken = pageToken;
+        if (useRestriction) {
+          // 策略 A：強制邊界（最精準，Google 只回傳範圍內）
+          body.locationRestriction = { circle: { center: { latitude: lat, longitude: lng }, radius } };
+        } else {
+          // 策略 B：偏好範圍（較寬鬆，但搭配自己的 Haversine 過濾）
+          body.locationBias = { circle: { center: { latitude: lat, longitude: lng }, radius: radius * 1.5 } };
+        }
 
-      const res = await fetch(url, { method: "POST", headers, body: JSON.stringify(body) });
-      const data = await res.json();
+        if (pageToken) body.pageToken = pageToken;
 
-      if (data.places) allPlaces = allPlaces.concat(data.places);
-      pageToken = data.nextPageToken || null;
-      pagesFetched++;
-    } while (pageToken && pagesFetched < MAX_PAGES);
+        const res = await fetch(url, { method: "POST", headers, body: JSON.stringify(body) });
+        const data = await res.json();
+
+        if (data.places) allPlaces = allPlaces.concat(data.places);
+        pageToken = data.nextPageToken || null;
+        pagesFetched++;
+      } while (pageToken && pagesFetched < MAX_PAGES);
+
+      return allPlaces;
+    };
+
+    // 策略 A：先用 locationRestriction 嘗試抓精確範圍
+    let allPlaces = await fetchPages(true);
+
+    // 策略 B：若結果小於 3 筆，改用 locationBias 補足（較寬鬆但搭配 Haversine 過濾）
+    if (allPlaces.length < 3) {
+      const biasPlaces = await fetchPages(false);
+      // 在這裡用 Haversine 嚴格過濾，只保留範圍內的
+      const strictInRadius = biasPlaces.filter(p => {
+        const pLat = p.location?.latitude;
+        const pLng = p.location?.longitude;
+        if (!pLat || !pLng) return false;
+        return haversineDistance(lat, lng, pLat, pLng) <= radius;
+      });
+      allPlaces = strictInRadius.length > 0 ? strictInRadius : biasPlaces; // 若還是沒有就全部保留
+    }
 
     if (allPlaces.length === 0) {
       return NextResponse.json({ success: true, deck: [] });
