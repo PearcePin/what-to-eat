@@ -57,17 +57,16 @@ export async function GET(request: Request) {
     let pagesFetched = 0;
     const MAX_PAGES = 5;
 
+    // 擴大搜尋母體：使用 locationBias 搜尋 3 倍半徑 (至多 5km)，確保 Google 能抓到足夠候選名單
+    const biasRadius = Math.min(radius * 3, 5000);
+
     do {
       const body: any = {
         textQuery,
-        // ==========================================
-        // 核心改變：使用 locationRestriction (強制限制)
-        // 這樣 Google 只會回傳您設定半徑內的店，不再有遠方殭屍推薦
-        // ==========================================
-        locationRestriction: {
+        locationBias: {
           circle: {
             center: { latitude: lat, longitude: lng },
-            radius: radius
+            radius: biasRadius
           }
         },
         languageCode: "zh-TW",
@@ -100,7 +99,7 @@ export async function GET(request: Request) {
     const overrides = await prisma.placeInfo.findMany({ where: { place_id: { in: placeIds } } });
     const overrideMap = new Map(overrides.map(o => [o.place_id, o]));
 
-    // 組裝牌庫並計算距離
+    // 組裝牌庫並計算精確距離
     let deck = allPlaces.map((place: any) => {
       const overrideData = overrideMap.get(place.id)
         ? { price: overrideMap.get(place.id)!.override_price, hours: overrideMap.get(place.id)!.override_hours }
@@ -113,7 +112,7 @@ export async function GET(request: Request) {
 
       const pLat = place.location?.latitude;
       const pLng = place.location?.longitude;
-      const dist = (pLat && pLng) ? haversineDistance(lat, lng, pLat, pLng) : radius;
+      const dist = (pLat && pLng) ? haversineDistance(lat, lng, pLat, pLng) : radius * 3;
 
       return {
         id: place.id,
@@ -136,6 +135,16 @@ export async function GET(request: Request) {
         overrideData,
       };
     });
+
+    // ==========================================
+    // 關鍵步：廣抓精篩 (Filter Tight)
+    // 雖然搜尋 3km，但我們手動過濾，只回傳 radius 內的店家
+    // ==========================================
+    deck = deck.filter(p => p.distance <= radius);
+
+    if (deck.length === 0) {
+      return NextResponse.json({ success: true, deck: [] });
+    }
 
     // 預算過濾
     if (budget && !budget.includes("今天不談錢的事")) {
