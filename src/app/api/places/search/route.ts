@@ -128,8 +128,25 @@ export async function GET(request: Request) {
         distanceText,
         photoRef: place.photos?.[0]?.photo_reference ?? null,
         overrideData,
+        priceLevel: details?.price_level ?? place.price_level ?? null,
       };
     });
+
+    // 預算過濾 (保留沒有 price_level 的餐廳，避免漏掉小吃店)
+    const budget = searchParams.get("budget");
+    if (budget) {
+      let minAllowed = 0;
+      let maxAllowed = 4;
+      if (budget.includes("100元以下")) maxAllowed = 1;
+      else if (budget.includes("100–300")) { minAllowed = 1; maxAllowed = 2; }
+      else if (budget.includes("300–600")) { minAllowed = 2; maxAllowed = 3; }
+      else if (budget.includes("600元以上")) { minAllowed = 3; maxAllowed = 4; }
+
+      recommendations = recommendations.filter((p) => {
+        if (p.priceLevel === null) return true; // 未知預算則保留
+        return p.priceLevel >= minAllowed && p.priceLevel <= maxAllowed;
+      });
+    }
 
     // 5. 排序：開業中 > 無資料 > 已打烊，同狀態內依 finalScore (加入隨機擾動)
     const openPriority = (a: any) =>

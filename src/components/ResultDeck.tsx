@@ -139,8 +139,8 @@ export default function ResultDeck({ filters, location, user, isGuest, isFavMode
     if (filters.transport.includes("汽機車")) radius = "5000";
     try {
       const url = useToken 
-        ? `/api/places/search?pagetoken=${nextPageToken}&lat=${location.lat}&lng=${location.lng}` 
-        : `/api/places/search?type=${encodeURIComponent(filters.type)}&radius=${radius}&lat=${location.lat}&lng=${location.lng}`;
+        ? `/api/places/search?pagetoken=${nextPageToken}&lat=${location.lat}&lng=${location.lng}&budget=${encodeURIComponent(filters.budget || "")}` 
+        : `/api/places/search?type=${encodeURIComponent(filters.type)}&radius=${radius}&lat=${location.lat}&lng=${location.lng}&budget=${encodeURIComponent(filters.budget || "")}`;
 
       const res = await fetch(url);
       const data = await res.json();
