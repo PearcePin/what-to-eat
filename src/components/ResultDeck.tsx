@@ -25,9 +25,11 @@ export default function ResultDeck({ filters, location, user, isGuest, isFavMode
   const [isSpinning, setIsSpinning] = useState(false);
   const [selectedPlace, setSelectedPlace] = useState<any>(null);
   const [feedbackPlace, setFeedbackPlace] = useState<any>(null);
-  const [userFavorites, setUserFavorites] = useState<string[]>([]); // 儲存 place_id 列表
+  const [userFavorites, setUserFavorites] = useState<string[]>([]);
   const [nextPageToken, setNextPageToken] = useState<string | null>(null);
-  const [expandedComments, setExpandedComments] = useState<string | null>(null); // 目前展開留言板的店家 ID
+  const [expandedComments, setExpandedComments] = useState<string | null>(null);
+  const [allResultsPool, setAllResultsPool] = useState<any[]>([]); // 全量大池子，換一批從這裡取
+  const [poolOffset, setPoolOffset] = useState(0); // 目前顯示的是池子的哪個 Slice
 
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 
@@ -130,35 +132,49 @@ export default function ResultDeck({ filters, location, user, isGuest, isFavMode
     }
   };
 
-  const fetchPlaces = async (useToken = false) => {
-    if (useToken && !nextPageToken) {
-      alert("範圍內已經沒有符合要求的其他店鋪了喔！");
-      return;
-    }
+  const fetchPlaces = async () => {
     setLoading(true);
     setSelectedPlace(null);
+    setPoolOffset(0);
     let radius = "1000";
     if (filters?.transport?.includes("腳踏車")) radius = "3000";
     if (filters?.transport?.includes("汽機車")) radius = "5000";
-    
-    try {
-      const url = useToken 
-        ? `/api/places/search?pagetoken=${nextPageToken}&lat=${location.lat}&lng=${location.lng}&budget=${encodeURIComponent(filters?.budget || "")}&meal=${encodeURIComponent(filters?.meal || "")}&type=${encodeURIComponent(filters?.type || "")}&radius=${radius}` 
-        : `/api/places/search?type=${encodeURIComponent(filters?.type || "")}&radius=${radius}&lat=${location.lat}&lng=${location.lng}&budget=${encodeURIComponent(filters?.budget || "")}&meal=${encodeURIComponent(filters?.meal || "")}`;
 
+    try {
+      const url = `/api/places/search?type=${encodeURIComponent(filters?.type || "")}&radius=${radius}&lat=${location.lat}&lng=${location.lng}&budget=${encodeURIComponent(filters?.budget || "")}&meal=${encodeURIComponent(filters?.meal || "")}`;
       const res = await fetch(url);
       const data = await res.json();
       if (data.success) {
         if (data.results.length === 0) {
-          alert("範圍內已經沒有符合要求的其他店鋪了喔！");
+          setError("範圍內沒有找到符合條件的店家，試試放寬距離或調整條件吧！");
         } else {
-          setPlaces(data.results);
-          setNextPageToken(data.nextPageToken || null);
+          // 存入大池子（allResults 包含所有找到的店家）
+          const pool = data.allResults || data.results;
+          setAllResultsPool(pool);
+          setPlaces(pool.slice(0, 10));
+          setNextPageToken(null);
           setError("");
         }
       } else setError(data.error || "無法載入餐廳資料");
     } catch { setError("連線錯誤"); }
     finally { setLoading(false); }
+  };
+
+  // 換一批：從本地大池子裡取下一個 10 筆，不需要打 API
+  const changeBatch = () => {
+    if (!allResultsPool.length) return;
+    const nextOffset = poolOffset + 10;
+    if (nextOffset >= allResultsPool.length) {
+      // 池子已用完，重新洗牌後從頭再來
+      const shuffled = [...allResultsPool].sort(() => Math.random() - 0.5);
+      setAllResultsPool(shuffled);
+      setPoolOffset(0);
+      setPlaces(shuffled.slice(0, 10));
+    } else {
+      setPoolOffset(nextOffset);
+      setPlaces(allResultsPool.slice(nextOffset, nextOffset + 10));
+    }
+    setSelectedPlace(null);
   };
 
   const handleRoulette = () => {
@@ -362,7 +378,7 @@ export default function ResultDeck({ filters, location, user, isGuest, isFavMode
           {isViewFavMode ? "📜 我的收藏清單" : "🍴 附近推薦"}
         </h3>
         {!selectedPlace && !isViewFavMode && !isFavMode && (
-          <button className="btn-secondary" style={{ padding: "6px 16px", fontSize: "0.82rem" }} onClick={() => fetchPlaces(true)}>
+          <button className="btn-secondary" style={{ padding: "6px 16px", fontSize: "0.82rem" }} onClick={changeBatch}>
             🔄 換一批
           </button>
         )}
