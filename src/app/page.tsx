@@ -20,17 +20,90 @@ export default function Home() {
   const [isFavMode, setIsFavMode] = useState(false);
   const [isViewFavMode, setIsViewFavMode] = useState(false);
 
+  // --- 瀏覽器返回鍵管理 (History API) ---
   useEffect(() => {
-    if (!auth) return;
-    const unsubscribe = auth.onAuthStateChanged((u: any) => setUser(u));
-    return () => unsubscribe();
+    // 初始進入時，將當前狀態記錄為 landing
+    if (window.history.state === null) {
+      window.history.replaceState({ step: "landing" }, "");
+    }
+
+    const handlePopState = (event: PopStateEvent) => {
+      const state = event.state;
+      if (!state) return;
+
+      // 根據歷史記錄的 state 回退狀態
+      if (state.step === "landing") {
+        setStarted(false);
+        setIsGuest(false);
+        setLocation(null);
+        setFilters(null);
+        setIsFavMode(false);
+        setIsViewFavMode(false);
+      } else if (state.step === "login") {
+        setStarted(true);
+        setIsGuest(false);
+        setLocation(null);
+        setFilters(null);
+      } else if (state.step === "location") {
+        setLocation(null);
+        setFilters(null);
+        setIsFavMode(false);
+        setIsViewFavMode(false);
+      } else if (state.step === "quiz") {
+        setFilters(null);
+        setIsFavMode(false);
+        setIsViewFavMode(false);
+      }
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
   }, []);
 
-  const handleLogin = async () => {
-    try { await loginWithGoogle(); } catch (e) { console.error(e); }
+  const pushStep = (step: string) => {
+    window.history.pushState({ step }, "");
   };
 
-  const handleQuizComplete = (finalFilters: any) => setFilters(finalFilters);
+  const handleStart = () => {
+    setStarted(true);
+    pushStep("login");
+  };
+
+  const handleGuestMode = () => {
+    setIsGuest(true);
+    pushStep("location");
+  };
+
+  const handleLocationConfirm = (loc: Location) => {
+    setLocation(loc);
+    pushStep("quiz");
+  };
+
+  const handleQuizComplete = (finalFilters: any) => {
+    setFilters(finalFilters);
+    pushStep("results");
+  };
+
+  const handleToggleFavMode = (mode: "fav" | "view") => {
+    if (mode === "fav") setIsFavMode(true);
+    else setIsViewFavMode(true);
+    pushStep("results");
+  };
+
+  const handleReselectLocation = () => {
+    setLocation(null);
+    setFilters(null);
+    setIsFavMode(false);
+    setIsViewFavMode(false);
+    pushStep("location");
+  };
+
+  const handleReselectCriteria = () => {
+    setFilters(null);
+    setIsFavMode(false);
+    setIsViewFavMode(false);
+    pushStep("quiz");
+  };
 
   const showLanding  = !started && !user && !isGuest;
   const showLogin    = started && !user && !isGuest;
@@ -38,23 +111,9 @@ export default function Home() {
   const showQuiz     = (!!user || isGuest) && !!location && !filters && !isFavMode && !isViewFavMode;
   const showResults  = (!!user || isGuest) && !!location && (!!filters || isFavMode || isViewFavMode);
 
-  const resetHome = () => {
-    setLocation(null);
-    setFilters(null);
-    setIsFavMode(false);
-    setIsViewFavMode(false);
-  };
-
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", paddingTop: "2rem", position: "relative" }}>
-      {/* 返回首頁 (當在流程中時顯示在左上角) */}
-      {(location || started) && (!showLanding && !showLogin) && (
-        <button onClick={resetHome}
-          style={{ position: "absolute", top: "1rem", left: "1rem", background: "none", border: "none", cursor: "pointer", fontSize: "1.2rem", animation: "fadeIn 0.3s ease", padding: "8px" }}>
-          🏠
-        </button>
-      )}
-
+      
       {/* Hero 標題 */}
       <div style={{ marginBottom: "2rem", animation: "fadeIn 0.6s ease" }}>
         <h1 className="text-gradient" style={{ fontSize: "3.2rem", lineHeight: 1.2, marginBottom: "0.5rem" }}>
@@ -67,7 +126,7 @@ export default function Home() {
 
       {/* 開始按鈕 */}
       {showLanding && (
-        <button className="btn-primary" onClick={() => setStarted(true)}
+        <button className="btn-primary" onClick={handleStart}
           style={{ fontSize: "1.1rem", padding: "16px 44px", animation: "fadeIn 0.8s ease" }}>
           ✨ 開始尋找美食
         </button>
@@ -81,32 +140,38 @@ export default function Home() {
             登入後可以幫餐廳評分，讓推薦更準確
           </p>
           <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
-            <button className="btn-secondary" onClick={() => setIsGuest(true)}>訪客繼續</button>
+            <button className="btn-secondary" onClick={handleGuestMode}>訪客繼續</button>
             <button className="btn-primary" onClick={handleLogin}>Google 登入</button>
           </div>
         </div>
       )}
 
       {/* 定位選擇 */}
-      {showLocation && <LocationPicker onConfirm={(loc) => setLocation(loc)} />}
+      {showLocation && <LocationPicker onConfirm={handleLocationConfirm} />}
 
       {/* 模式選擇 (定位後) */}
       {(!!user || isGuest) && !!location && !filters && !isFavMode && !isViewFavMode && (
         <div style={{ marginBottom: "1.5rem", display: "flex", flexWrap: "wrap", justifyContent: "center", gap: "10px", animation: "fadeIn 0.5s ease" }}>
           <button className="btn-secondary" onClick={() => {
             if (isGuest) {
-              if (window.confirm("登入後可以開啟「最愛抽籤」與「收藏」功能喔！是否現在前往登入？")) setIsGuest(false);
+              if (window.confirm("登入後可以開啟「最愛抽籤」與「收藏」功能喔！是否現在前往登入？")) {
+                setIsGuest(false);
+                pushStep("login");
+              }
             } else {
-              setIsFavMode(true);
+              handleToggleFavMode("fav");
             }
           }} style={{ padding: "10px 20px" }}>
             🎯 抽收藏店家
           </button>
           <button className="btn-secondary" onClick={() => {
             if (isGuest) {
-              if (window.confirm("登入後可以查看您的收藏店家！是否現在前往登入？")) setIsGuest(false);
+              if (window.confirm("登入後可以查看您的收藏店家！是否現在前往登入？")) {
+                setIsGuest(false);
+                pushStep("login");
+              }
             } else {
-              setIsViewFavMode(true);
+              handleToggleFavMode("view");
             }
           }} style={{ padding: "10px 20px" }}>
             📜 瀏覽所有收藏
@@ -121,30 +186,38 @@ export default function Home() {
       {/* 問卷 */}
       {showQuiz && <Quiz user={user!} onComplete={handleQuizComplete} />}
 
-      {/* 結果 */}
-      {showResults && <ResultDeck filters={filters} location={location!} user={user} isGuest={isGuest} isFavMode={isFavMode} isViewFavMode={isViewFavMode} onLoginRequest={() => { resetHome(); setIsGuest(false); }} />}
+      {/* 結果與導航按鈕 */}
+      {showResults && (
+        <div style={{ width: "100%", maxWidth: "480px", animation: "fadeIn 0.5s ease" }}>
+          {/* 功能按鈕列 */}
+          <div style={{ display: "flex", gap: "10px", marginBottom: "1.2rem", padding: "0 1.2rem" }}>
+            <button className="btn-secondary" onClick={handleReselectLocation} style={{ flex: 1, padding: "12px", borderRadius: "14px", fontSize: "0.9rem" }}>
+              📍 重選地點
+            </button>
+            <button className="btn-secondary" onClick={handleReselectCriteria} style={{ flex: 1, padding: "12px", borderRadius: "14px", fontSize: "0.9rem" }}>
+              📋 重選條件
+            </button>
+          </div>
+          
+          <ResultDeck filters={filters} location={location!} user={user} isGuest={isGuest} isFavMode={isFavMode} isViewFavMode={isViewFavMode} onLoginRequest={() => { setLocation(null); setFilters(null); setIsGuest(false); pushStep("login"); }} />
+        </div>
+      )}
 
-      {/* 位置標示 */}
-      {(user || isGuest) && location && (
+      {/* 地點標示 (僅在未填問卷時顯示微調按鈕) */}
+      {(user || isGuest) && location && !filters && !isFavMode && !isViewFavMode && (
         <p style={{ marginTop: "1rem", fontSize: "0.78rem", color: "var(--text-light)" }}>
-          {filters || isFavMode || isViewFavMode ? (
-            <button onClick={resetHome}
-              style={{ marginLeft: "8px", color: "var(--primary)", background: "none", border: "none", cursor: "pointer", fontSize: "0.78rem", textDecoration: "underline", fontFamily: "inherit" }}>
-              ← 返回主畫面
-            </button>
-          ) : (
-            <button onClick={() => setLocation(null)}
-              style={{ marginLeft: "8px", color: "var(--primary)", background: "none", border: "none", cursor: "pointer", fontSize: "0.78rem", textDecoration: "underline", fontFamily: "inherit" }}>
-              重選
-            </button>
-          )}
+          📍 目前位置：{location.label}
+          <button onClick={() => setLocation(null)}
+            style={{ marginLeft: "8px", color: "var(--primary)", background: "none", border: "none", cursor: "pointer", fontSize: "0.78rem", textDecoration: "underline", fontFamily: "inherit" }}>
+            (點我重選)
+          </button>
         </p>
       )}
 
       {/* 登出 / 訪客結束 */}
       {(user || isGuest) && (
-        <button onClick={() => { logout(); setUser(null); setIsGuest(false); setLocation(null); setFilters(null); }}
-          style={{ marginTop: "0.8rem", color: "var(--text-light)", background: "none", border: "none", cursor: "pointer", fontSize: "0.75rem", textDecoration: "underline", fontFamily: "inherit" }}>
+        <button onClick={() => { logout(); setUser(null); setIsGuest(false); setLocation(null); setFilters(null); pushStep("landing"); }}
+          style={{ marginTop: "1.5rem", color: "var(--text-light)", background: "none", border: "none", cursor: "pointer", fontSize: "0.75rem", textDecoration: "underline", opacity: 0.6 }}>
           {user ? `登出 ${user.email}` : "結束訪客模式"}
         </button>
       )}
