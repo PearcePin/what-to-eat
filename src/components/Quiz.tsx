@@ -3,26 +3,44 @@
 import { useState } from "react";
 import { User } from "firebase/auth";
 
-const TYPES = ['🍲 火鍋', '🍱 日式', '🍝 義式', '🥢 台式小吃', '☕ 咖啡廳', '🎲 隨便'];
+const STEPS = ['現在想吃哪一餐？', '想吃什麼樣的？', '預算大概多少？', '打算怎麼前往？'];
+
+const MEALS = ['🥪 早餐', '🍱 午餐', '🍽️ 晚餐', '🌙 消夜', '🍰 點心'];
+
+const MEAL_TO_TYPES: Record<string, string[]> = {
+  '🥪 早餐': ['🥪 三明治', '🍳 蛋餅/豆漿', '🍔 早午餐/漢堡', '🥣 傳統中式', '☕ 咖啡輕食'],
+  '🍱 午餐': ['🍲 火鍋', '🍱 日式/壽司', '🍝 義式/西餐', '🥢 台式小吃', '🥩 排餐/牛排', '🥡 便當/快餐', '🎲 隨便'],
+  '🍽️ 晚餐': ['🍲 火鍋', '🍱 日式/壽司', '🍝 義式/西餐', '🥢 台式小吃', '🥩 排餐/牛排', '🍢 串燒/居酒屋', '🎲 隨便'],
+  '🌙 消夜': ['🍗 鹹酥雞', '🍢 串燒', '🥘 滷味', '🍲 火鍋', '🥣 涼麵/宵夜粥', '🍢 居酒屋'],
+  '🍰 點心': ['🍰 蛋糕甜點', '🧋 搖飲/冰品', '🥖 麵包/鬆餅', '☕ 咖啡廳', '🍪 甜食/零嘴'],
+};
+
 const BUDGETS = ['100元以下 (銅板美食)', '100–300元 (一般餐廳)', '300–600元 (質感餐廳)', '600元以上 (進階料理)', '今天不談錢的事 💸'];
 const TRANSPORTS = ['🚶 步行（1km以內）', '🚲 腳踏車（3km以內）', '🚗 汽機車（10km以內）'];
-
-const STEPS = ['今天想吃什麼？', '預算大概多少？', '打算怎麼前往？'];
 
 const COLORS = ['#FFB7C5', '#FFD2B0', '#FFE599', '#B8E0CF', '#A3CCE0', '#C5B3E8'];
 
 export default function Quiz({ user, onComplete }: { user: User; onComplete: (f: any) => void }) {
   const [step, setStep] = useState(0);
-  const [filters, setFilters] = useState({ type: '', budget: '', transport: '' });
+  const [filters, setFilters] = useState({ meal: '', type: '', budget: '', transport: '' });
 
-  const lists = [TYPES, BUDGETS, TRANSPORTS];
-  const keys  = ['type', 'budget', 'transport'] as const;
+  // 動態決定當前步驟的選項列表
+  const getCurrentList = () => {
+    if (step === 0) return MEALS;
+    if (step === 1) return MEAL_TO_TYPES[filters.meal] || MEAL_TO_TYPES['🍱 午餐'];
+    if (step === 2) return BUDGETS;
+    if (step === 3) return TRANSPORTS;
+    return [];
+  };
+
+  const keys = ['meal', 'type', 'budget', 'transport'] as const;
 
   const choose = (value: string) => {
     const key = keys[step];
     const next = { ...filters, [key]: value };
-    if (step < 2) {
-      setFilters(next);
+    setFilters(next);
+    
+    if (step < 3) {
       setStep(s => s + 1);
     } else {
       onComplete(next);
@@ -45,7 +63,7 @@ export default function Quiz({ user, onComplete }: { user: User; onComplete: (f:
 
       {/* 步驟指示器 */}
       <div style={{ display: "flex", gap: "6px", marginBottom: "1.6rem" }}>
-        {[0, 1, 2].map(i => (
+        {[0, 1, 2, 3].map(i => (
           <div key={i} style={{
             flex: 1, height: "5px", borderRadius: "99px",
             background: i <= step ? "var(--primary)" : "rgba(0,0,0,0.08)",
@@ -56,7 +74,7 @@ export default function Quiz({ user, onComplete }: { user: User; onComplete: (f:
 
       {/* 選項按鈕 */}
       <div style={{ display: "flex", flexDirection: "column", gap: "0.7rem" }}>
-        {lists[step].map((item, idx) => (
+        {getCurrentList().map((item, idx) => (
           <button
             key={item}
             onClick={() => choose(item)}

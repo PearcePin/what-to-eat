@@ -140,8 +140,8 @@ export default function ResultDeck({ filters, location, user, isGuest, isFavMode
     
     try {
       const url = useToken 
-        ? `/api/places/search?pagetoken=${nextPageToken}&lat=${location.lat}&lng=${location.lng}&budget=${encodeURIComponent(filters.budget || "")}` 
-        : `/api/places/search?type=${encodeURIComponent(filters.type)}&radius=${radius}&lat=${location.lat}&lng=${location.lng}&budget=${encodeURIComponent(filters.budget || "")}`;
+        ? `/api/places/search?pagetoken=${nextPageToken}&lat=${location.lat}&lng=${location.lng}&budget=${encodeURIComponent(filters?.budget || "")}&meal=${encodeURIComponent(filters?.meal || "")}` 
+        : `/api/places/search?type=${encodeURIComponent(filters?.type || "")}&radius=${radius}&lat=${location.lat}&lng=${location.lng}&budget=${encodeURIComponent(filters?.budget || "")}&meal=${encodeURIComponent(filters?.meal || "")}`;
 
       const res = await fetch(url);
       const data = await res.json();
