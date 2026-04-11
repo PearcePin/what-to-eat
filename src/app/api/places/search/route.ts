@@ -23,11 +23,34 @@ function formatDistance(meters: number): string {
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
-  const type = searchParams.get("type") || "餐廳";
+  const rawMeal = searchParams.get("meal") || "";
+  const rawType = searchParams.get("type") || "";
   const radius = parseFloat(searchParams.get("radius") || "1000");
   const lat = parseFloat(searchParams.get("lat") || "25.033964");
   const lng = parseFloat(searchParams.get("lng") || "121.564468");
   const budget = searchParams.get("budget");
+
+  // 1. 清理關鍵字 (去除表情符號並轉換為優化關鍵字)
+  const clean = (str: string) => str.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E6}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '').trim();
+  
+  const meal = clean(rawMeal);
+  const type = clean(rawType);
+
+  // 2. 智慧映射：將餐次映射到 Google 官方類別 (includedType)
+  // 這能極大化提升精準度，過濾掉藥局、超商等非餐廳結果
+  let includedType = "restaurant"; 
+  let optimizedMeal = meal;
+
+  if (meal === "早餐") {
+    includedType = "breakfast_restaurant";
+    optimizedMeal = "早餐店";
+  } else if (meal === "點心") {
+    includedType = "dessert_shop"; // 或 "cafe"
+  } else if (meal === "消夜") {
+    optimizedMeal = "宵夜";
+  }
+
+  const combinedQuery = `${optimizedMeal} ${type}`.trim() || "餐廳";
 
   const apiKey = process.env.GOOGLE_MAPS_API_KEY || process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
   if (!apiKey) {
@@ -41,7 +64,8 @@ export async function GET(request: Request) {
     const url = "https://places.googleapis.com/v1/places:searchText";
     
     const body: any = {
-      textQuery: type,
+      textQuery: combinedQuery,
+      includedType: includedType, // 強制度過濾非相關類別
       locationBias: {
         circle: {
           center: { latitude: lat, longitude: lng },
@@ -49,7 +73,7 @@ export async function GET(request: Request) {
         }
       },
       languageCode: "zh-TW",
-      maxResultCount: 20 // Google API (New) 單次請求上限為 20
+      maxResultCount: 20
     };
 
     if (pageToken) {
@@ -100,14 +124,13 @@ export async function GET(request: Request) {
         name: place.displayName?.text || "未命名餐廳",
         address: place.formattedAddress || "",
         rating: place.rating,
-        finalScore: gRating, // 完全回歸至 Google Rating
+        finalScore: gRating,
         isCommunityRecommended,
         openNow,
         displayHours,
         isCommunityHours: !!overrideData?.hours,
         distance: distMeters,
         distanceText: distMeters ? formatDistance(distMeters) : null,
-        // 新版照片 API 的格式是 projects/.../photos/...
         photoRef: place.photos?.[0]?.name ?? null,
         priceLevel: place.priceLevel === "PRICE_LEVEL_FREE" ? 0 : 
                    place.priceLevel === "PRICE_LEVEL_INEXPENSIVE" ? 1 :
@@ -119,11 +142,9 @@ export async function GET(request: Request) {
       };
     });
 
-    // 嚴格過濾距離 (解決 Google API locationBias 可能跑太遠的問題)
+    // 嚴格過濾距離
     recommendations = recommendations.filter((p: any) => {
-      // 如果無法計算距離，暫且保留，但如果有距離就必須在範圍內
       if (p.distance === null) return true;
-      // 緩衝區設為 radius 的 1.1 倍，避免邊緣判定過嚴
       return p.distance <= radius * 1.1;
     });
 
@@ -141,23 +162,20 @@ export async function GET(request: Request) {
       });
     }
 
-    // 5. 隨機化與排序邏輯 (Variety 核心)
-    // 依營業狀態分組，同組內完全隨機混合高品質名單
+    // 5. 排序與隨機化 (Variety 優化)
     const openPriority = (p: any) => p.openNow === true ? 0 : p.openNow === null ? 1 : 2;
     
-    recommendations.sort((a: any, b: any) => {
+    recommendations.sort((a, b) => {
       const op = openPriority(a) - openPriority(b);
       if (op !== 0) return op;
 
-      // 在同一個營業狀態下，給予較大的隨機擾動，實現「換一批要盡量不一樣」
-      // 擾動值放大為 ±1.5，讓 3.5 分的店也有機會隨機贏過 4.5 分的店出現在首頁
-      const randomA = a.finalScore + (Math.random() * 3.0 - 1.5);
-      const randomB = b.finalScore + (Math.random() * 3.0 - 1.5);
+      // 調低隨機干擾幅度 (±0.5)，確保「相關度越高、評分越好」的店首選出現
+      // 但仍保留一點換一批的味道
+      const randomA = a.finalScore + (Math.random() * 1.0 - 0.5);
+      const randomB = b.finalScore + (Math.random() * 1.0 - 0.5);
       return randomB - randomA;
     });
 
-    // 從 60 家候選中隨機打亂並取前 10
-    // 這保證了即便在第一頁，每次點頭像或搜尋都能看到不同的組合
     return NextResponse.json({
       success: true,
       results: recommendations.slice(0, 10),
