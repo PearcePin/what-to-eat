@@ -137,10 +137,10 @@ export async function GET(request: Request) {
     if (budget && !budget.includes("今天不談錢的事")) {
       let minAllowed = 0;
       let maxAllowed = 4;
-      if (budget.includes("100元以下")) { minAllowed = 1; maxAllowed = 1; }
-      else if (budget.includes("100–300")) { minAllowed = 1; maxAllowed = 2; }
-      else if (budget.includes("300–600")) { minAllowed = 2; maxAllowed = 3; }
-      else if (budget.includes("600元以上")) { minAllowed = 3; maxAllowed = 4; }
+      if (budget.startsWith("$ ")) { minAllowed = 1; maxAllowed = 1; }
+      else if (budget.startsWith("$$ ")) { minAllowed = 2; maxAllowed = 2; }
+      else if (budget.startsWith("$$$ ")) { minAllowed = 3; maxAllowed = 3; }
+      else if (budget.startsWith("$$$$ ")) { minAllowed = 4; maxAllowed = 4; }
 
       recommendations = recommendations.filter((p) => {
         if (p.priceLevel === null) return false; // 使用者明確說沒有標價的不要

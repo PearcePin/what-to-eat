@@ -137,6 +137,7 @@ export default function ResultDeck({ filters, location, user, isGuest, isFavMode
     let radius = "1000";
     if (filters.transport.includes("腳踏車")) radius = "3000";
     if (filters.transport.includes("汽機車")) radius = "5000";
+    
     try {
       const url = useToken 
         ? `/api/places/search?pagetoken=${nextPageToken}&lat=${location.lat}&lng=${location.lng}&budget=${encodeURIComponent(filters.budget || "")}` 
@@ -172,10 +173,10 @@ export default function ResultDeck({ filters, location, user, isGuest, isFavMode
     ref && apiKey ? `https://maps.googleapis.com/maps/api/place/photo?maxwidth=600&photo_reference=${ref}&key=${apiKey}` : null;
 
   const getPriceLabel = (level: number | null) => {
-    if (level === 1) return "💰 < $200";
-    if (level === 2) return "💰💰 $200-500";
-    if (level === 3) return "💰💰💰 $500-1,000";
-    if (level && level >= 4) return "💰💰💰💰 $1,000+";
+    if (level === 1) return "💰 $ (平價)";
+    if (level === 2) return "💰💰 $$ (中等)";
+    if (level === 3) return "💰💰💰 $$$ (高價)";
+    if (level && level >= 4) return "💰💰💰💰 $$$$ (頂級)";
     return null;
   };
 
