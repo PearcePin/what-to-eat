@@ -143,7 +143,7 @@ export async function GET(request: Request) {
       else if (budget.includes("600元以上")) { minAllowed = 3; maxAllowed = 4; }
 
       recommendations = recommendations.filter((p) => {
-        if (p.priceLevel === null) return true; // 未知預算則保留
+        if (p.priceLevel === null) return false; // 使用者明確說沒有標價的不要
         return p.priceLevel >= minAllowed && p.priceLevel <= maxAllowed;
       });
     }
