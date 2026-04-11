@@ -29,8 +29,22 @@ model PlaceInfo {
   override_price  String?
   override_hours  String?
   reviews         UserReview[]
+  comments        PlaceComment[]
   favorites       Favorite[]
   updatedAt       DateTime     @updatedAt
+}
+
+model PlaceComment {
+  id        String   @id @default(uuid())
+  place_id  String
+  userName  String?
+  userEmail String?
+  userPhoto String?
+  text      String
+  imageUrl  String?
+  createdAt DateTime @default(now())
+
+  place     PlaceInfo @relation(fields: [place_id], references: [place_id])
 }
 
 model Favorite {

@@ -1,5 +1,6 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, Auth } from "firebase/auth";
+import { getStorage, FirebaseStorage } from "firebase/storage";
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -12,6 +13,7 @@ const firebaseConfig = {
 
 let app;
 let auth: Auth | undefined;
+let storage: FirebaseStorage | undefined;
 let googleProvider: GoogleAuthProvider | undefined;
 
 // 只有在瀏覽器環境執行
@@ -19,11 +21,12 @@ if (typeof window !== "undefined") {
   if (process.env.NEXT_PUBLIC_FIREBASE_API_KEY) {
     app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
     auth = getAuth(app);
+    storage = getStorage(app);
     googleProvider = new GoogleAuthProvider();
   }
 }
 
-export { auth, googleProvider };
+export { auth, storage, googleProvider };
 
 export const loginWithGoogle = async () => {
   if (!auth || !googleProvider) {

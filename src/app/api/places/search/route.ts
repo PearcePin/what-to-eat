@@ -49,7 +49,7 @@ export async function GET(request: Request) {
         }
       },
       languageCode: "zh-TW",
-      maxResultCount: 20
+      maxResultCount: 20 // Google API (New) 單次請求上限為 20
     };
 
     if (pageToken) {
@@ -72,7 +72,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ success: true, results: [] });
     }
 
-    // 2. 查詢社群覆寫資料 (基於 Place ID)
+    // 2. 查詢社群推薦標記 (僅用於顯示，不影響排名)
     const placeIds = data.places.map((p: any) => p.id);
     const overrides = await prisma.placeInfo.findMany({ where: { place_id: { in: placeIds } } });
     const overrideMap = new Map(overrides.map(o => [o.place_id, o]));
@@ -80,19 +80,8 @@ export async function GET(request: Request) {
     // 3. 組裝結果
     let recommendations = data.places.map((place: any) => {
       const gRating = place.rating || 0;
-      let finalScore = gRating;
-      let isCommunityRecommended = false;
-      let overrideData: any = null;
-
-      if (overrideMap.has(place.id)) {
-        const uData = overrideMap.get(place.id)!;
-        const uRating = uData.avg_user_rating || 0;
-        if (uRating > 0) {
-          finalScore = gRating * 0.5 + uRating * 0.5;
-          isCommunityRecommended = true;
-        }
-        overrideData = { price: uData.override_price, hours: uData.override_hours };
-      }
+      const isCommunityRecommended = overrideMap.has(place.id) && (overrideMap.get(place.id)!.avg_user_rating > 0);
+      const overrideData = overrideMap.get(place.id) ? { price: overrideMap.get(place.id)!.override_price, hours: overrideMap.get(place.id)!.override_hours } : null;
 
       // 新版 API 的營業時間
       const openNow = place.regularOpeningHours?.openNow ?? null;
@@ -111,8 +100,7 @@ export async function GET(request: Request) {
         name: place.displayName?.text || "未命名餐廳",
         address: place.formattedAddress || "",
         rating: place.rating,
-        userRating: overrideMap.get(place.id)?.avg_user_rating || null,
-        finalScore: parseFloat(finalScore.toFixed(1)),
+        finalScore: gRating, // 完全回歸至 Google Rating
         isCommunityRecommended,
         openNow,
         displayHours,
@@ -153,16 +141,23 @@ export async function GET(request: Request) {
       });
     }
 
-    // 5. 隨機排序擾動
+    // 5. 隨機化與排序邏輯 (Variety 核心)
+    // 依營業狀態分組，同組內完全隨機混合高品質名單
     const openPriority = (p: any) => p.openNow === true ? 0 : p.openNow === null ? 1 : 2;
+    
     recommendations.sort((a: any, b: any) => {
-      const dp = openPriority(a) - openPriority(b);
-      if (dp !== 0) return dp;
-      const sA = a.finalScore + (Math.random() * 1.2 - 0.6);
-      const sB = b.finalScore + (Math.random() * 1.2 - 0.6);
-      return sB - sA;
+      const op = openPriority(a) - openPriority(b);
+      if (op !== 0) return op;
+
+      // 在同一個營業狀態下，給予較大的隨機擾動，實現「換一批要盡量不一樣」
+      // 擾動值放大為 ±1.5，讓 3.5 分的店也有機會隨機贏過 4.5 分的店出現在首頁
+      const randomA = a.finalScore + (Math.random() * 3.0 - 1.5);
+      const randomB = b.finalScore + (Math.random() * 3.0 - 1.5);
+      return randomB - randomA;
     });
 
+    // 從 60 家候選中隨機打亂並取前 10
+    // 這保證了即便在第一頁，每次點頭像或搜尋都能看到不同的組合
     return NextResponse.json({
       success: true,
       results: recommendations.slice(0, 10),

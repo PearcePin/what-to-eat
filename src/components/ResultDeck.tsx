@@ -1,7 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import FeedbackModal from "./FeedbackModal";
+import { storage } from "@/lib/firebase";
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 
 interface Location { lat: number; lng: number; label: string; }
 
@@ -25,6 +27,7 @@ export default function ResultDeck({ filters, location, user, isGuest, isFavMode
   const [feedbackPlace, setFeedbackPlace] = useState<any>(null);
   const [userFavorites, setUserFavorites] = useState<string[]>([]); // 儲存 place_id 列表
   const [nextPageToken, setNextPageToken] = useState<string | null>(null);
+  const [expandedComments, setExpandedComments] = useState<string | null>(null); // 目前展開留言板的店家 ID
 
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 
@@ -197,6 +200,129 @@ export default function ResultDeck({ filters, location, user, isGuest, isFavMode
     if (level === 3) return `💰 ${icons} (高價)`;
     if (level >= 4) return `💰 ${icons} (頂級)`;
     return null;
+  };
+
+  /* ──── 專屬於每個店家的留言區組件 ──── */
+  const CommentSection = ({ placeId }: { placeId: string }) => {
+    const [comments, setComments] = useState<any[]>([]);
+    const [loading, setLoading] = useState(false);
+    const [text, setText] = useState("");
+    const [uploading, setUploading] = useState(false);
+    const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+
+    const fetchComments = async () => {
+      setLoading(true);
+      try {
+        const res = await fetch(`/api/places/comment?placeId=${placeId}`);
+        const data = await res.json();
+        if (data.success) setComments(data.comments);
+      } catch (e) { console.error(e); }
+      finally { setLoading(false); }
+    };
+
+    useEffect(() => { fetchComments(); }, [placeId]);
+
+    const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      
+      setUploading(true);
+      try {
+        const imgRef = ref(storage!, `comments/${placeId}/${Date.now()}_${file.name}`);
+        await uploadBytes(imgRef, file);
+        const url = await getDownloadURL(imgRef);
+        setPreviewUrl(url);
+      } catch (e) {
+        alert("圖片上傳失敗，請稍後再試");
+        console.error(e);
+      } finally {
+        setUploading(false);
+      }
+    };
+
+    const submitComment = async () => {
+      if (!text.trim()) return;
+      if (!user) return onLoginRequest?.();
+
+      try {
+        const res = await fetch("/api/places/comment", {
+          method: "POST",
+          body: JSON.stringify({
+            placeId,
+            text,
+            imageUrl: previewUrl,
+            userName: user.displayName,
+            userPhoto: user.photoURL,
+            userEmail: user.email
+          })
+        });
+        const data = await res.json();
+        if (data.success) {
+          setText("");
+          setPreviewUrl(null);
+          fetchComments();
+        }
+      } catch (e) { console.error(e); }
+    };
+
+    return (
+      <div style={{ padding: "1rem", background: "rgba(0,0,0,0.03)", borderRadius: "0 0 20px 20px", borderTop: "1.5px solid var(--card-border)" }}>
+        <h4 style={{ margin: "0 0 0.8rem", fontSize: "0.9rem", color: "var(--text)" }}>💬 網友心得 ({comments.length})</h4>
+        
+        {/* 留言列表 */}
+        <div style={{ display: "flex", flexDirection: "column", gap: "1rem", marginBottom: "1rem", maxHeight: "250px", overflowY: "auto" }}>
+          {loading ? <p style={{ fontSize: "0.8rem", color: "var(--text-light)" }}>載入中...</p> : 
+           comments.length === 0 ? <p style={{ fontSize: "0.8rem", color: "var(--text-light)" }}>目前還沒有心得喔，來當第一個吧！</p> :
+           comments.map(c => (
+             <div key={c.id} style={{ display: "flex", gap: "10px" }}>
+               {c.userPhoto && <img src={c.userPhoto} style={{ width: "32px", height: "32px", borderRadius: "50%" }} />}
+               <div style={{ flex: 1 }}>
+                 <div style={{ display: "flex", justifyContent: "space-between" }}>
+                   <span style={{ fontSize: "0.8rem", fontWeight: 700 }}>{c.userName || "匿名"}</span>
+                   <span style={{ fontSize: "0.7rem", color: "var(--text-light)" }}>{new Date(c.createdAt).toLocaleDateString()}</span>
+                 </div>
+                 <p style={{ margin: "4px 0", fontSize: "0.85rem", color: "var(--text-secondary)" }}>{c.text}</p>
+                 {c.imageUrl && (
+                   <img src={c.imageUrl} style={{ width: "100%", maxWidth: "120px", borderRadius: "8px", marginTop: "4px", cursor: "zoom-in" }} onClick={() => window.open(c.imageUrl, "_blank")} />
+                 )}
+               </div>
+             </div>
+           ))}
+        </div>
+
+        {/* 發表留言區 */}
+        {user ? (
+          <div style={{ background: "#fff", padding: "8px", borderRadius: "12px", border: "1px solid var(--card-border)" }}>
+            <textarea 
+              placeholder="分享一下這家店好不好吃..."
+              value={text}
+              onChange={e => setText(e.target.value)}
+              style={{ width: "100%", border: "none", outline: "none", resize: "none", fontSize: "0.85rem", minHeight: "60px", fontFamily: "inherit" }}
+            />
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "6px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <button 
+                  onClick={() => fileInputRef.current?.click()}
+                  style={{ background: "none", border: "none", cursor: "pointer", fontSize: "1.1rem", opacity: uploading ? 0.4 : 1 }}
+                  disabled={uploading}
+                >
+                  📷
+                </button>
+                <input type="file" ref={fileInputRef} onChange={handleFileChange} style={{ display: "none" }} accept="image/*" />
+                {previewUrl && <span style={{ fontSize: "0.7rem", color: "var(--primary)" }}>✓ 已選圖片</span>}
+                {uploading && <span style={{ fontSize: "0.7rem", color: "var(--text-light)" }}>上傳中...</span>}
+              </div>
+              <button className="btn-primary" onClick={submitComment} style={{ padding: "4px 14px", fontSize: "0.8rem" }}>傳送</button>
+            </div>
+          </div>
+        ) : (
+          <p style={{ fontSize: "0.75rem", textAlign: "center", color: "var(--text-light)" }}>
+            請先 <button onClick={() => onLoginRequest?.()} style={{ color: "var(--primary)", background: "none", border: "none", textDecoration: "underline", padding: 0, cursor: "pointer", fontSize: "0.75rem" }}>登入</button> 發表心得
+          </p>
+        )}
+      </div>
+    );
   };
 
   /* ──── 載入中 ──── */
@@ -376,10 +502,21 @@ export default function ResultDeck({ filters, location, user, isGuest, isFavMode
                     className="btn-secondary"
                     style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "12px", fontSize: "0.95rem", fontWeight: 700, borderRadius: "12px", textDecoration: "none", width: "100%", marginTop: "4px" }}
                   >
-                    🗺️ 開啟 Google Maps 導航前往
+                    🗺️ Google Maps 導航
                   </a>
+                  {/* 查看心得按鈕 */}
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setExpandedComments(prev => prev === place.id ? null : place.id); }}
+                    className="btn-secondary"
+                    style={{ background: "rgba(0,0,0,0.03)", border: "1px dashed var(--card-border)", color: "var(--text-secondary)", fontSize: "0.82rem", width: "100%", marginTop: "8px", borderRadius: "10px" }}
+                  >
+                    {expandedComments === place.id ? "🔼 收起心得" : "💬 查看網友心得"}
+                  </button>
                 </div>
               </div>
+              
+              {/* 展開的留言區 */}
+              {expandedComments === place.id && <CommentSection placeId={place.id} />}
             </div>
           );
         })}
