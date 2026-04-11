@@ -169,14 +169,33 @@ export default function ResultDeck({ filters, location, user, isGuest, isFavMode
     }, 100);
   };
 
-  const getPhotoUrl = (ref: string | null) =>
-    ref && apiKey ? `https://maps.googleapis.com/maps/api/place/photo?maxwidth=600&photo_reference=${ref}&key=${apiKey}` : null;
+  const getPhotoUrl = (ref: string | null) => {
+    if (!ref || !apiKey) return null;
+    // 新版 API 格式：places/PLACE_ID/photos/PHOTO_ID
+    if (ref.startsWith("places/")) {
+      return `https://places.googleapis.com/v1/${ref}/media?maxHeightPx=400&maxWidthPx=400&key=${apiKey}`;
+    }
+    // 舊版格式 (用於快照資料)
+    return `https://maps.googleapis.com/maps/api/place/photo?maxwidth=600&photo_reference=${ref}&key=${apiKey}`;
+  };
 
-  const getPriceLabel = (level: number | null) => {
-    if (level === 1) return "💰 $ (平價)";
-    if (level === 2) return "💰💰 $$ (中等)";
-    if (level === 3) return "💰💰💰 $$$ (高價)";
-    if (level && level >= 4) return "💰💰💰💰 $$$$ (頂級)";
+  const getPriceLabel = (place: any) => {
+    const level = place.priceLevel;
+    const range = place.priceRange;
+
+    // 優先顯示精確範圍 (例如: $400 - $600)
+    if (range?.startPrice?.units && range?.endPrice?.units) {
+      return `💰 $${range.startPrice.units} - ${range.endPrice.units}`;
+    } else if (range?.startPrice?.units) {
+      return `💰 ~$${range.startPrice.units}`;
+    }
+
+    // 次之顯示等級
+    const icons = level === 1 ? "$" : level === 2 ? "$$" : level === 3 ? "$$$" : level >= 4 ? "$$$$" : "";
+    if (level === 1) return `💰 ${icons} (平價)`;
+    if (level === 2) return `💰 ${icons} (中等)`;
+    if (level === 3) return `💰 ${icons} (高價)`;
+    if (level >= 4) return `💰 ${icons} (頂級)`;
     return null;
   };
 
@@ -301,7 +320,11 @@ export default function ResultDeck({ filters, location, user, isGuest, isFavMode
                 <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", marginBottom: "0.9rem" }}>
                   {place.openNow === true  && <Tag color="#3DAA80" bg="rgba(157,219,192,0.25)" border="rgba(157,219,192,0.6)">🟢 開業中</Tag>}
                   {place.openNow === false && <Tag color="#E07080" bg="rgba(255,182,193,0.25)" border="rgba(255,182,193,0.6)">🔴 已打烊</Tag>}
-                  {place.priceLevel != null && <Tag color="#B08030" bg="rgba(240,225,200,0.4)" border="rgba(240,220,180,0.8)">{getPriceLabel(place.priceLevel)}</Tag>}
+                  {(place.priceLevel != null || place.priceRange) && (
+                    <Tag color="#B08030" bg="rgba(240,225,200,0.4)" border="rgba(240,220,180,0.8)">
+                      {getPriceLabel(place)}
+                    </Tag>
+                  )}
                   {place.distanceText     && <Tag color="#C07030" bg="rgba(255,210,176,0.3)"  border="rgba(255,210,176,0.7)">🚶 {place.distanceText}</Tag>}
                   <Tag color="var(--text-secondary)" bg="rgba(0,0,0,0.04)" border="rgba(0,0,0,0.08)">Google ⭐ {place.rating ?? "–"}</Tag>
                   {place.isCommunityRecommended && <Tag color="#5A7FD0" bg="rgba(163,204,224,0.25)" border="rgba(163,204,224,0.6)">✦ 社群推薦</Tag>}

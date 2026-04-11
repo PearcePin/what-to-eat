@@ -21,21 +21,13 @@ function formatDistance(meters: number): string {
   return `${(meters / 1000).toFixed(1)} 公里`;
 }
 
-// 取得今天星期對應的 weekday_text 索引（Google 的 weekday_text 從週一開始）
-function getTodayHoursText(weekdayText: string[]): string | null {
-  const jsDay = new Date().getDay(); // 0=Sunday, 1=Monday, ...
-  const idx = jsDay === 0 ? 6 : jsDay - 1; // 轉換為 0=Monday...6=Sunday
-  return weekdayText?.[idx] ?? null;
-}
-
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const type = searchParams.get("type") || "餐廳";
-  const radius = searchParams.get("radius") || "1000";
-  const lat = searchParams.get("lat") || "25.033964";
-  const lng = searchParams.get("lng") || "121.564468";
-
-  const pageToken = searchParams.get("pagetoken");
+  const radius = parseFloat(searchParams.get("radius") || "1000");
+  const lat = parseFloat(searchParams.get("lat") || "25.033964");
+  const lng = parseFloat(searchParams.get("lng") || "121.564468");
+  const budget = searchParams.get("budget");
 
   const apiKey = process.env.GOOGLE_MAPS_API_KEY || process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
   if (!apiKey) {
@@ -43,45 +35,52 @@ export async function GET(request: Request) {
   }
 
   try {
-    // 1. 附近搜尋
-    const placesUrl = pageToken 
-      ? `https://maps.googleapis.com/maps/api/place/nearbysearch/json?pagetoken=${pageToken}&key=${apiKey}`
-      : `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=${radius}&keyword=${encodeURIComponent(type)}&key=${apiKey}`;
-    const res = await fetch(placesUrl);
+    // 1. 使用 Google Places API (New) - Search Text
+    // 這樣可以像舊版一樣使用 keyword (type) 並限制在定位周圍
+    const url = "https://places.googleapis.com/v1/places:searchText";
+    
+    const body = {
+      textQuery: type,
+      locationBias: {
+        circle: {
+          center: { latitude: lat, longitude: lng },
+          radius: radius
+        }
+      },
+      languageCode: "zh-TW",
+      maxResultCount: 15
+    };
+
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": apiKey,
+        "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.rating,places.priceLevel,places.priceRange,places.regularOpeningHours,places.photos,places.location,places.types"
+      },
+      body: JSON.stringify(body)
+    });
+
     const data = await res.json();
 
-    if (data.status !== "OK") {
-      return NextResponse.json({ error: data.error_message || data.status }, { status: 500 });
+    if (!data.places) {
+      return NextResponse.json({ success: true, results: [] });
     }
 
-    // 2. 平行取得每家店的 Place Details（取得今日完整營業時間）
-    const detailsFetches = (data.results as any[]).map(async (place: any) => {
-      try {
-        const url = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${place.place_id}&fields=opening_hours,price_level&language=zh-TW&key=${apiKey}`;
-        const r = await fetch(url);
-        const d = await r.json();
-        return { placeId: place.place_id, details: d.result ?? null };
-      } catch {
-        return { placeId: place.place_id, details: null };
-      }
-    });
-    const detailsResults = await Promise.all(detailsFetches);
-    const detailsMap = new Map(detailsResults.map(d => [d.placeId, d.details]));
-
-    // 3. 查詢社群覆寫資料
-    const placeIds = (data.results as any[]).map((p: any) => p.place_id);
+    // 2. 查詢社群覆寫資料 (基於 Place ID)
+    const placeIds = data.places.map((p: any) => p.id);
     const overrides = await prisma.placeInfo.findMany({ where: { place_id: { in: placeIds } } });
     const overrideMap = new Map(overrides.map(o => [o.place_id, o]));
 
-    // 4. 組裝結果
-    let recommendations = (data.results as any[]).map((place: any) => {
+    // 3. 組裝結果
+    let recommendations = data.places.map((place: any) => {
       const gRating = place.rating || 0;
       let finalScore = gRating;
       let isCommunityRecommended = false;
       let overrideData: any = null;
 
-      if (overrideMap.has(place.place_id)) {
-        const uData = overrideMap.get(place.place_id)!;
+      if (overrideMap.has(place.id)) {
+        const uData = overrideMap.get(place.id)!;
         const uRating = uData.avg_user_rating || 0;
         if (uRating > 0) {
           finalScore = gRating * 0.5 + uRating * 0.5;
@@ -90,85 +89,74 @@ export async function GET(request: Request) {
         overrideData = { price: uData.override_price, hours: uData.override_hours };
       }
 
-      // Place Details 資料
-      const details = detailsMap.get(place.place_id);
-      const openHours = details?.opening_hours;
-      const openNow: boolean | null = openHours?.open_now ?? place.opening_hours?.open_now ?? null;
+      // 新版 API 的營業時間
+      const openNow = place.regularOpeningHours?.openNow ?? null;
+      const todayHours = place.regularOpeningHours?.weekdayDescriptions?.[new Date().getDay() === 0 ? 6 : new Date().getDay() - 1] ?? null;
 
-      // 今日營業時間文字（例："星期三：上午10:00 – 下午11:00"）
-      const todayText: string | null = openHours?.weekday_text
-        ? getTodayHoursText(openHours.weekday_text)
-        : null;
+      // 社群修正時間優先
+      const displayHours: string | null = overrideData?.hours || todayHours;
 
-      // 社群修正時間優先顯示
-      const displayHours: string | null = overrideData?.hours || todayText;
-
-      // 計算與使用者的距離
-      const placeLat = place.geometry?.location?.lat;
-      const placeLng = place.geometry?.location?.lng;
-      const distanceMeters =
-        placeLat != null && placeLng != null
-          ? haversineDistance(parseFloat(lat), parseFloat(lng), placeLat, placeLng)
-          : null;
-      const distanceText = distanceMeters != null ? formatDistance(distanceMeters) : null;
+      // 計算距離
+      const pLat = place.location?.latitude;
+      const pLng = place.location?.longitude;
+      const distMeters = (pLat && pLng) ? haversineDistance(lat, lng, pLat, pLng) : null;
 
       return {
-        id: place.place_id,
-        name: place.name,
-        address: place.vicinity,
+        id: place.id,
+        name: place.displayName?.text || "未命名餐廳",
+        address: place.formattedAddress || "",
         rating: place.rating,
-        userRating: overrideMap.has(place.place_id) ? overrideMap.get(place.place_id)!.avg_user_rating : null,
+        userRating: overrideMap.get(place.id)?.avg_user_rating || null,
         finalScore: parseFloat(finalScore.toFixed(1)),
         isCommunityRecommended,
         openNow,
-        todayText,
         displayHours,
         isCommunityHours: !!overrideData?.hours,
-        distance: distanceMeters,
-        distanceText,
-        photoRef: place.photos?.[0]?.photo_reference ?? null,
+        distance: distMeters,
+        distanceText: distMeters ? formatDistance(distMeters) : null,
+        // 新版照片 API 的格式是 projects/.../photos/...
+        photoRef: place.photos?.[0]?.name ?? null,
+        priceLevel: place.priceLevel === "PRICE_LEVEL_FREE" ? 0 : 
+                   place.priceLevel === "PRICE_LEVEL_INEXPENSIVE" ? 1 :
+                   place.priceLevel === "PRICE_LEVEL_MODERATE" ? 2 :
+                   place.priceLevel === "PRICE_LEVEL_EXPENSIVE" ? 3 :
+                   place.priceLevel === "PRICE_LEVEL_VERY_EXPENSIVE" ? 4 : null,
+        priceRange: place.priceRange || null,
         overrideData,
-        priceLevel: details?.price_level ?? place.price_level ?? null,
       };
     });
 
-    // 預算過濾 (保留沒有 price_level 的餐廳，避免漏掉小吃店)
-    const budget = searchParams.get("budget");
+    // 4. 預算過濾
     if (budget && !budget.includes("今天不談錢的事")) {
-      let minAllowed = 0;
-      let maxAllowed = 4;
-      if (budget.startsWith("$ ")) { minAllowed = 1; maxAllowed = 1; }
-      else if (budget.startsWith("$$ ")) { minAllowed = 2; maxAllowed = 2; }
-      else if (budget.startsWith("$$$ ")) { minAllowed = 3; maxAllowed = 3; }
-      else if (budget.startsWith("$$$$ ")) { minAllowed = 4; maxAllowed = 4; }
+      let minL = 1, maxL = 4;
+      if (budget.startsWith("$ ")) { minL = 1; maxL = 1; }
+      else if (budget.startsWith("$$ ")) { minL = 2; maxL = 2; }
+      else if (budget.startsWith("$$$ ")) { minL = 3; maxL = 3; }
+      else if (budget.startsWith("$$$$ ")) { minL = 4; maxL = 4; }
 
-      recommendations = recommendations.filter((p) => {
-        if (p.priceLevel === null) return false; // 使用者明確說沒有標價的不要
-        return p.priceLevel >= minAllowed && p.priceLevel <= maxAllowed;
+      recommendations = recommendations.filter((p: any) => {
+        if (!p.priceLevel) return false;
+        return p.priceLevel >= minL && p.priceLevel <= maxL;
       });
     }
 
-    // 5. 排序：開業中 > 無資料 > 已打烊，同狀態內依 finalScore (加入隨機擾動)
-    const openPriority = (a: any) =>
-      a.openNow === true ? 0 : a.openNow === null ? 1 : 2;
-    recommendations.sort((a, b) => {
-      const diff = openPriority(a) - openPriority(b);
-      if (diff !== 0) return diff;
-      
-      // 給予 ±0.6 的隨機擾動值，讓每次搜尋結果有一點隨機性，但好店依然容易在上面
-      const scoreA = a.finalScore + (Math.random() * 1.2 - 0.6);
-      const scoreB = b.finalScore + (Math.random() * 1.2 - 0.6);
-      return scoreB - scoreA;
+    // 5. 隨機排序擾動
+    const openPriority = (p: any) => p.openNow === true ? 0 : p.openNow === null ? 1 : 2;
+    recommendations.sort((a: any, b: any) => {
+      const dp = openPriority(a) - openPriority(b);
+      if (dp !== 0) return dp;
+      const sA = a.finalScore + (Math.random() * 1.2 - 0.6);
+      const sB = b.finalScore + (Math.random() * 1.2 - 0.6);
+      return sB - sA;
     });
 
     return NextResponse.json({
       success: true,
-      results: recommendations.slice(0, 10),
-      nextPageToken: data.next_page_token || null,
+      results: recommendations.slice(0, 10)
     });
 
   } catch (error: any) {
-    console.error("Search API Error:", error);
+    console.error("New Search API Error:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
