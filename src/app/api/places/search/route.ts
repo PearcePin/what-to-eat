@@ -34,12 +34,13 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Missing Google Maps API Key" }, { status: 500 });
   }
 
+  const pageToken = searchParams.get("pagetoken");
+
   try {
     // 1. 使用 Google Places API (New) - Search Text
-    // 這樣可以像舊版一樣使用 keyword (type) 並限制在定位周圍
     const url = "https://places.googleapis.com/v1/places:searchText";
     
-    const body = {
+    const body: any = {
       textQuery: type,
       locationBias: {
         circle: {
@@ -51,12 +52,16 @@ export async function GET(request: Request) {
       maxResultCount: 15
     };
 
+    if (pageToken) {
+      body.pageToken = pageToken;
+    }
+
     const res = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "X-Goog-Api-Key": apiKey,
-        "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.rating,places.priceLevel,places.priceRange,places.regularOpeningHours,places.photos,places.location,places.types"
+        "X-Goog-FieldMask": "nextPageToken,places.id,places.displayName,places.formattedAddress,places.rating,places.priceLevel,places.priceRange,places.regularOpeningHours,places.photos,places.location,places.types"
       },
       body: JSON.stringify(body)
     });
@@ -152,7 +157,8 @@ export async function GET(request: Request) {
 
     return NextResponse.json({
       success: true,
-      results: recommendations.slice(0, 10)
+      results: recommendations.slice(0, 10),
+      nextPageToken: data.nextPageToken || null,
     });
 
   } catch (error: any) {
