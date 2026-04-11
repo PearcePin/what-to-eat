@@ -12,7 +12,7 @@ const MEAL_TO_TYPES: Record<string, string[]> = {
   '🍱 午餐': ['🍲 火鍋', '🍱 日式/壽司', '🍝 義式/西餐', '🥢 台式小吃', '🥩 排餐/牛排', '🥡 便當/快餐', '🎲 隨便'],
   '🍽️ 晚餐': ['🍲 火鍋', '🍱 日式/壽司', '🍝 義式/西餐', '🥢 台式小吃', '🥩 排餐/牛排', '🍢 串燒/居酒屋', '🎲 隨便'],
   '🌙 消夜': ['🍗 鹹酥雞', '🍢 串燒', '🥘 滷味', '🍲 火鍋', '🥣 涼麵/宵夜粥', '🍢 居酒屋'],
-  '🍰 點心': ['🍰 蛋糕甜點', '🧋 搖飲/冰品', '🥖 麵包/鬆餅', '☕ 咖啡廳', '🍪 甜食/零嘴'],
+  '🍰 點心': ['🧋 飲料', '🍰 甜點', '☕ 咖啡廳'],
 };
 
 const BUDGETS = ['100元以下 (銅板美食)', '100–300元 (一般餐廳)', '300–600元 (質感餐廳)', '600元以上 (進階料理)', '今天不談錢的事 💸'];
@@ -38,8 +38,18 @@ export default function Quiz({ user, onComplete }: { user: User; onComplete: (f:
   const choose = (value: string) => {
     const key = keys[step];
     const next = { ...filters, [key]: value };
-    setFilters(next);
     
+    // 邏輯優化：早餐跟消夜跳過第二題
+    if (step === 0) {
+      if (value === '🥪 早餐' || value === '🌙 消夜') {
+        const jumpedNext = { ...next, type: '' }; // 清空 type，由 meal 關鍵字主導搜尋
+        setFilters(jumpedNext);
+        setStep(2); // 直接跳到預算
+        return;
+      }
+    }
+
+    setFilters(next);
     if (step < 3) {
       setStep(s => s + 1);
     } else {
@@ -108,7 +118,14 @@ export default function Quiz({ user, onComplete }: { user: User; onComplete: (f:
       {/* 返回 */}
       {step > 0 && (
         <button
-          onClick={() => setStep(s => s - 1)}
+          onClick={() => {
+            // 如果目前在預算頁且是早餐或消夜，要跳回第一題
+            if (step === 2 && (filters.meal === '🥪 早餐' || filters.meal === '🌙 消夜')) {
+              setStep(0);
+            } else {
+              setStep(s => s - 1);
+            }
+          }}
           style={{ marginTop: "1rem", color: "var(--text-secondary)", fontSize: "0.83rem", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit" }}
         >
           ← 上一步
