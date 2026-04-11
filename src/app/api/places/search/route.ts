@@ -3,6 +3,15 @@ import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
+function haversineDistance(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371000;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
 function formatDistance(meters: number): string {
   if (meters < 1000) return `${Math.round(meters)} 公尺`;
   return `${(meters / 1000).toFixed(1)} 公里`;
@@ -96,6 +105,10 @@ export async function GET(request: Request) {
         new Date().getDay() === 0 ? 6 : new Date().getDay() - 1
       ] ?? null;
 
+      const pLat = place.location?.latitude;
+      const pLng = place.location?.longitude;
+      const distMeters = (pLat && pLng) ? haversineDistance(lat, lng, pLat, pLng) : null;
+
       return {
         id: place.id,
         name: place.displayName?.text || "未命名餐廳",
@@ -105,7 +118,8 @@ export async function GET(request: Request) {
         displayHours: overrideData?.hours || todayHours || null,
         isCommunityRecommended: overrideMap.has(place.id) && (overrideMap.get(place.id)!.avg_user_rating > 0),
         isCommunityHours: !!overrideData?.hours,
-        distanceText: null, // 已交由 Google locationBias 處理，不再自算距離
+        distance: distMeters,
+        distanceText: distMeters !== null ? formatDistance(distMeters) : null,
         photoRef: place.photos?.[0]?.name ?? null,
         priceLevel: place.priceLevel === "PRICE_LEVEL_FREE" ? 0 :
           place.priceLevel === "PRICE_LEVEL_INEXPENSIVE" ? 1 :
