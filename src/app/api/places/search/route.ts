@@ -68,13 +68,13 @@ export async function GET(request: Request) {
     do {
       const body: any = {
         textQuery: combinedQuery,
-        // 不設 includedType：讓 Google 依關鍵字自由搜尋
-        // 原因：台灣許多早餐店、速食店在 Google 被分類為 meal_takeaway / food
-        // 而非 restaurant，強制設為 restaurant 會漏掉麥味登、美而美等大量店家
-        locationRestriction: {
+        // 使用 locationBias（偏好範圍）而非 locationRestriction（強制範圍）
+        // 原因：locationRestriction 對中文 textQuery 支援不穩定，常導致 0 結果
+        // 我們改用自己的 haversine 距離過濾來嚴格限制範圍，效果更可靠
+        locationBias: {
           circle: {
             center: { latitude: lat, longitude: lng },
-            radius: radius
+            radius: radius * 3 // 搜尋 3 倍半徑，讓 Google 有足夠候選，然後我們自己過濾
           }
         },
         languageCode: "zh-TW",
@@ -181,15 +181,15 @@ export async function GET(request: Request) {
       return scoreB - scoreA;
     });
 
-    // 因為已用 locationRestriction，不再需要二次距離過濾
-    // 回傳全部結果（前端一次顯示 10 筆，剩餘的讓「換一批」來消化）
+    // 嚴格距離過濾（由我們自己執行，確保只回傳 radius 內的店家）
+    const strictFiltered = recommendations.filter((p: any) => p.distance <= radius);
+
     return NextResponse.json({
       success: true,
-      results: recommendations.slice(0, 10),
-      // 把整個已排好序的池子也傳回去（含後續的「換一批」候選）
-      allResults: recommendations,
-      totalFound: recommendations.length,
-      nextPageToken: null, // 已全部抓完，不需要 pageToken
+      results: strictFiltered.slice(0, 10),
+      allResults: strictFiltered,
+      totalFound: strictFiltered.length,
+      nextPageToken: null,
     });
 
   } catch (error: any) {
