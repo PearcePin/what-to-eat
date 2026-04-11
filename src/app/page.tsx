@@ -20,6 +20,16 @@ export default function Home() {
   const [isFavMode, setIsFavMode] = useState(false);
   const [isViewFavMode, setIsViewFavMode] = useState(false);
 
+  useEffect(() => {
+    if (!auth) return;
+    const unsubscribe = auth.onAuthStateChanged((u: any) => setUser(u));
+    return () => unsubscribe();
+  }, []);
+
+  const handleLogin = async () => {
+    try { await loginWithGoogle(); } catch (e) { console.error(e); }
+  };
+
   // --- 瀏覽器返回鍵管理 (History API) ---
   useEffect(() => {
     // 初始進入時，將當前狀態記錄為 landing
