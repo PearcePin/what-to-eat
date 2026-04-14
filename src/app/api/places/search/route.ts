@@ -54,23 +54,32 @@ export async function GET(request: Request) {
       "X-Goog-FieldMask": "nextPageToken,places.id,places.displayName,places.formattedAddress,places.rating,places.priceLevel,places.priceRange,places.regularOpeningHours,places.photos,places.location"
     };
 
-    // 擴大搜尋母體：同時發送兩個不同的關鍵字請求，以突破單次搜尋 60 筆的限制
-    const queries = [textQuery];
-    if (meal === "早餐") queries.push("早午餐");
-    else if (meal === "消夜") queries.push("深夜食堂");
-    else if (meal !== "餐廳") queries.push(meal);
+    // ==========================================
+    // 五重雷達分波搜尋 (Grid Search)
+    // 解決 Google API 每點上限 60 筆的問題
+    // ==========================================
+    const offset = (radius / 111320) * 0.5; // 約為半徑的一半偏移（單位：度）
+    const lngOffset = offset / Math.cos(lat * Math.PI / 180);
 
-    const fetchUniquePlaces = async (query: string) => {
+    const locations = [
+      { latitude: lat, longitude: lng }, // 中央
+      { latitude: lat + offset, longitude: lng }, // 北
+      { latitude: lat - offset, longitude: lng }, // 南
+      { latitude: lat, longitude: lng + lngOffset }, // 東
+      { latitude: lat, longitude: lng - lngOffset }, // 西
+    ];
+
+    const fetchGridPoint = async (loc: { latitude: number, longitude: number }) => {
       let places: any[] = [];
       let pageToken: string | null = null;
       let pagesFetched = 0;
-      const biasRadius = Math.min(radius * 3, 5000);
-
+      
+      // 每個點抓 2 頁 (40筆)，5 個點共回收 200 筆母體
       do {
         const body: any = {
-          textQuery: query,
+          textQuery,
           locationBias: {
-            circle: { center: { latitude: lat, longitude: lng }, radius: biasRadius }
+            circle: { center: loc, radius: radius * 0.6 } // 縮小單點半徑以利涵蓋
           },
           languageCode: "zh-TW",
           maxResultCount: 20
@@ -82,19 +91,19 @@ export async function GET(request: Request) {
         if (data.places) places = places.concat(data.places);
         pageToken = data.nextPageToken || null;
         pagesFetched++;
-      } while (pageToken && pagesFetched < 3);
+      } while (pageToken && pagesFetched < 2);
       return places;
     };
 
-    // 並行執行所有搜尋請求
-    const resultsArray = await Promise.all(queries.map(q => fetchUniquePlaces(q)));
+    // 同步發動 5 重雷達
+    const resultsArray = await Promise.all(locations.map(loc => fetchGridPoint(loc)));
     let allPlaces = resultsArray.flat();
 
     if (allPlaces.length === 0) {
       return NextResponse.json({ success: true, deck: [] });
     }
 
-    // 去重 (重複的 Place ID 只保留一個)
+    // 全域去重 (重複的 Place ID 只保留一個)
     const seen = new Set<string>();
     allPlaces = allPlaces.filter(p => {
       if (seen.has(p.id)) return false;
@@ -107,7 +116,7 @@ export async function GET(request: Request) {
     const overrides = await prisma.placeInfo.findMany({ where: { place_id: { in: placeIds } } });
     const overrideMap = new Map(overrides.map(o => [o.place_id, o]));
 
-    // 組裝牌庫並計算精確距離
+    // 組裝牌庫並計算精確距離 (以原始中心點 lat/lng 為準)
     let deck = allPlaces.map((place: any) => {
       const overrideData = overrideMap.get(place.id)
         ? { price: overrideMap.get(place.id)!.override_price, hours: overrideMap.get(place.id)!.override_hours }
@@ -120,7 +129,7 @@ export async function GET(request: Request) {
 
       const pLat = place.location?.latitude;
       const pLng = place.location?.longitude;
-      const dist = (pLat && pLng) ? haversineDistance(lat, lng, pLat, pLng) : radius * 3;
+      const dist = (pLat && pLng) ? haversineDistance(lat, lng, pLat, pLng) : radius * 1.5;
 
       return {
         id: place.id,
@@ -153,9 +162,9 @@ export async function GET(request: Request) {
       deck = deck.filter(p => !p.priceLevel || (p.priceLevel >= minL && p.priceLevel <= maxL));
     }
 
-    // 距離優先排序
+    // 距離優先排序 (Proximity Scoring)
     deck.sort((a, b) => {
-      const distScore = (d: number) => d < 100 ? 50 : d < 300 ? 30 : d < 500 ? 20 : d < 1000 ? 10 : 0;
+      const distScore = (d: number) => d < 100 ? 60 : d < 300 ? 35 : d < 500 ? 25 : d < 1000 ? 15 : 0;
       const openScore = (open: boolean | null) => open === true ? 5 : 0;
       const scoreA = (a.rating || 0) + distScore(a.distance) + openScore(a.openNow) + (Math.random() * 0.5);
       const scoreB = (b.rating || 0) + distScore(b.distance) + openScore(b.openNow) + (Math.random() * 0.5);
