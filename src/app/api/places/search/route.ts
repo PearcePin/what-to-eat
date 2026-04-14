@@ -48,7 +48,6 @@ export async function GET(request: Request) {
     const headers = {
       "Content-Type": "application/json",
       "X-Goog-Api-Key": apiKey,
-      // 升級 FieldMask: 加入 places.types 用於精準過濾
       "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.rating,places.priceLevel,places.priceRange,places.regularOpeningHours,places.photos,places.location,places.types"
     };
 
@@ -76,7 +75,6 @@ export async function GET(request: Request) {
     };
 
     const fetchNearby = async (loc: any) => {
-      // 動態針對餐期選擇最精確的類型標籤 (Google 官方 Table A)
       let includedTypes = ["restaurant"];
       if (meal === "早餐") {
         includedTypes = ["breakfast_restaurant", "brunch_restaurant", "bakery", "sandwich_shop", "cafe"];
@@ -117,14 +115,18 @@ export async function GET(request: Request) {
     const overrideMap = new Map(overrides.map(o => [o.place_id, o]));
 
     // ==========================================
-    // 建立精準權重映射邏輯 (Relevance Engine)
+    // 精準度引擎 2.0：語義字典與負向類型
     // ==========================================
-    const mealRelevantTypes: Record<string, string[]> = {
-      "早餐": ["breakfast_restaurant", "brunch_restaurant", "bakery", "sandwich_shop", "cafe", "coffee_shop"],
-      "點心": ["dessert_shop", "ice_cream_shop", "bakery", "cafe", "tea_house", "candy_store"],
-      "消夜": ["bar", "night_club", "liquor_store", "restaurant"],
-      "午餐": ["restaurant", "chinese_restaurant", "japanese_restaurant", "italian_restaurant"],
-      "晚餐": ["restaurant", "chinese_restaurant", "japanese_restaurant", "italian_restaurant"]
+    const mealSynonyms: Record<string, string[]> = {
+      "早餐": ["早餐", "早點", "早午餐", "brunch", "蛋餅", "吐司", "漢堡", "飯糰", "燒餅", "豆漿", "美而美", "麥味登", "早安", "晨間"],
+      "點心": ["甜點", "蛋糕", "甜品", "冰淇淋", "咖啡", "下午茶", "點心", "豆花"],
+      "消夜": ["宵夜", "消夜", "深夜", "居酒屋", "串燒", "拉麵", "滷味", "永和豆漿"]
+    };
+
+    const mealNegatives: Record<string, string[]> = {
+      "早餐": ["japanese_restaurant", "steak_house", "thai_restaurant", "sushi_restaurant", "izakaya", "bar", "night_club", "ramen_restaurant"],
+      "點心": ["steak_house", "sushi_restaurant", "chinese_restaurant", "hamburger_restaurant"],
+      "消夜": ["bakery", "breakfast_restaurant"]
     };
 
     let deck = allPlaces.map((place: any) => {
@@ -141,16 +143,24 @@ export async function GET(request: Request) {
       const pTypes = place.types || [];
       const pName = (place.displayName?.text || "").toLowerCase();
       
-      // 1. 類別標籤比對 (Types Match)
-      const targetTypes = mealRelevantTypes[meal] || ["restaurant"];
-      if (pTypes.some((t: string) => targetTypes.includes(t))) {
-        relevanceScore += 2000; // 官方類別符合
+      // 1. 類別標籤評分 (分級權重)
+      if (meal === "早餐") {
+        if (pTypes.some((t: string) => ["breakfast_restaurant", "brunch_restaurant"].includes(t))) relevanceScore += 4000;
+        else if (pTypes.some((t: string) => ["bakery", "sandwich_shop"].includes(t))) relevanceScore += 2000;
+        else if (pTypes.includes("cafe")) relevanceScore += 500;
+      } else if (meal === "點心") {
+        if (pTypes.some((t: string) => ["dessert_shop", "ice_cream_shop"].includes(t))) relevanceScore += 4000;
+        else if (pTypes.some((t: string) => ["bakery", "cafe"].includes(t))) relevanceScore += 2000;
       }
       
-      // 2. 名稱關鍵字比對 (Name Match)
-      const keywords = [meal, type].filter(Boolean);
-      if (keywords.some(k => pName.includes(k.toLowerCase()))) {
-        relevanceScore += 1500; // 名稱符合關鍵字
+      // 2. 語義同義詞比對 (Synonym Match)
+      if (mealSynonyms[meal]?.some(s => pName.includes(s.toLowerCase()))) {
+        relevanceScore += 3000;
+      }
+
+      // 3. 負向類型處罰 (Negative Penalty)
+      if (mealNegatives[meal]?.some(t => pTypes.includes(t))) {
+        relevanceScore -= 8000; // 毀滅性降權
       }
 
       return {
@@ -168,7 +178,7 @@ export async function GET(request: Request) {
         isCommunityRecommended: overrideMap.has(place.id) && (overrideMap.get(place.id)!.avg_user_rating > 0),
         isCommunityHours: !!overrideData?.hours,
         overrideData,
-        relevanceScore, // 用於排序
+        relevanceScore,
       };
     });
 
@@ -180,17 +190,11 @@ export async function GET(request: Request) {
       deck = deck.filter(p => !p.priceLevel || (p.priceLevel >= minL && p.priceLevel <= maxL));
     }
 
-    // ==========================================
-    // 精準多維排序 (Multi-dimensional Ranking)
-    // ==========================================
+    // 將資料按總分排序回傳，供前端優先過濾
     deck.sort((a, b) => {
-      // 距離權重：與基礎得分相結合
       const distScore = (d: number) => d < 50 ? 5000 : d < 150 ? 2500 : d < 300 ? 500 : d < 500 ? 200 : 100;
-      
-      // 總分 = 距離分 + 相關分 + 評分加成 + 隨機微調
       const scoreA = distScore(a.distance) + (a.relevanceScore || 0) + (a.rating || 0) * 10 + (Math.random() * 0.5);
       const scoreB = distScore(b.distance) + (b.relevanceScore || 0) + (b.rating || 0) * 10 + (Math.random() * 0.5);
-      
       return scoreB - scoreA;
     });
 

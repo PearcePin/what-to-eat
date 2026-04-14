@@ -149,9 +149,12 @@ export default function ResultDeck({ filters, location, user, isGuest, isFavMode
         if (deck.length === 0) {
           setError("範圍內沒有找到符合條件的店家，試試放寬距離或調整條件吧！");
         } else {
-          setAllResultsPool(deck); // 整副牌
-          // 隨機從牌庫抽 10 張顯示
-          const hand = [...deck].sort(() => Math.random() - 0.5).slice(0, 10);
+          setAllResultsPool(deck); // 整副牌 (已在後端依相關性+距離排序)
+          
+          // 智能推薦邏輯：優先從前 30 筆相關性最高的店中隨機抽 10 筆
+          const topCandidates = deck.slice(0, Math.min(30, deck.length));
+          const hand = [...topCandidates].sort(() => Math.random() - 0.5).slice(0, 10);
+          
           setPlaces(hand);
           setNextPageToken(null);
           setError("");
@@ -161,10 +164,11 @@ export default function ResultDeck({ filters, location, user, isGuest, isFavMode
     finally { setLoading(false); }
   };
 
-  // 換批：從整副牌重新隨機抽 10 張（允許重複，每次都是新鮮感）
+  // 換一批：同樣優先從高品質候選池中抽選
   const changeBatch = () => {
     if (!allResultsPool.length) return;
-    const hand = [...allResultsPool].sort(() => Math.random() - 0.5).slice(0, 10);
+    const topCandidates = allResultsPool.slice(0, Math.min(30, allResultsPool.length));
+    const hand = [...topCandidates].sort(() => Math.random() - 0.5).slice(0, 10);
     setPlaces(hand);
     setSelectedPlace(null);
   };
