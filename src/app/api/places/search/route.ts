@@ -48,13 +48,10 @@ export async function GET(request: Request) {
     const headers = {
       "Content-Type": "application/json",
       "X-Goog-Api-Key": apiKey,
-      "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.rating,places.priceLevel,places.priceRange,places.regularOpeningHours,places.photos,places.location"
+      // 升級 FieldMask: 加入 places.types 用於精準過濾
+      "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.rating,places.priceLevel,places.priceRange,places.regularOpeningHours,places.photos,places.location,places.types"
     };
 
-    // ==========================================
-    // 終極混合雷達：Text Search (關鍵字) + Nearby Search (屬性)
-    // 這是對標 Google Maps 手機版最強大的搜尋組合
-    // ==========================================
     const offset = (radius / 111320) * 0.5;
     const lngOffset = offset / Math.cos(lat * Math.PI / 180);
     const locations = [
@@ -79,7 +76,16 @@ export async function GET(request: Request) {
     };
 
     const fetchNearby = async (loc: any) => {
-      const includedTypes = meal === "早餐" ? ["breakfast_restaurant", "brunch_restaurant", "restaurant"] : ["restaurant"];
+      // 動態針對餐期選擇最精確的類型標籤 (Google 官方 Table A)
+      let includedTypes = ["restaurant"];
+      if (meal === "早餐") {
+        includedTypes = ["breakfast_restaurant", "brunch_restaurant", "bakery", "sandwich_shop", "cafe"];
+      } else if (meal === "點心") {
+        includedTypes = ["dessert_shop", "ice_cream_shop", "bakery", "cafe", "tea_house"];
+      } else if (meal === "消夜") {
+        includedTypes = ["bar", "night_club", "restaurant"];
+      }
+      
       const res = await fetch("https://places.googleapis.com/v1/places:searchNearby", {
         method: "POST", headers, body: JSON.stringify({
           includedTypes,
@@ -91,7 +97,6 @@ export async function GET(request: Request) {
       return data.places || [];
     };
 
-    // 同步發動 10 路搜尋 (5xText + 5xNearby)
     const resultsArray = await Promise.all([
       ...locations.map(loc => fetchText(loc)),
       ...locations.map(loc => fetchNearby(loc))
@@ -111,6 +116,17 @@ export async function GET(request: Request) {
     const overrides = await prisma.placeInfo.findMany({ where: { place_id: { in: placeIds } } });
     const overrideMap = new Map(overrides.map(o => [o.place_id, o]));
 
+    // ==========================================
+    // 建立精準權重映射邏輯 (Relevance Engine)
+    // ==========================================
+    const mealRelevantTypes: Record<string, string[]> = {
+      "早餐": ["breakfast_restaurant", "brunch_restaurant", "bakery", "sandwich_shop", "cafe", "coffee_shop"],
+      "點心": ["dessert_shop", "ice_cream_shop", "bakery", "cafe", "tea_house", "candy_store"],
+      "消夜": ["bar", "night_club", "liquor_store", "restaurant"],
+      "午餐": ["restaurant", "chinese_restaurant", "japanese_restaurant", "italian_restaurant"],
+      "晚餐": ["restaurant", "chinese_restaurant", "japanese_restaurant", "italian_restaurant"]
+    };
+
     let deck = allPlaces.map((place: any) => {
       const overrideData = overrideMap.get(place.id)
         ? { price: overrideMap.get(place.id)!.override_price, hours: overrideMap.get(place.id)!.override_hours }
@@ -120,6 +136,23 @@ export async function GET(request: Request) {
       const pLng = place.location?.longitude;
       const dist = (pLat && pLng) ? haversineDistance(lat, lng, pLat, pLng) : radius * 1.5;
 
+      // 相關性得分計算
+      let relevanceScore = 0;
+      const pTypes = place.types || [];
+      const pName = (place.displayName?.text || "").toLowerCase();
+      
+      // 1. 類別標籤比對 (Types Match)
+      const targetTypes = mealRelevantTypes[meal] || ["restaurant"];
+      if (pTypes.some((t: string) => targetTypes.includes(t))) {
+        relevanceScore += 2000; // 官方類別符合
+      }
+      
+      // 2. 名稱關鍵字比對 (Name Match)
+      const keywords = [meal, type].filter(Boolean);
+      if (keywords.some(k => pName.includes(k.toLowerCase()))) {
+        relevanceScore += 1500; // 名稱符合關鍵字
+      }
+
       return {
         id: place.id,
         name: place.displayName?.text || "未命名餐廳",
@@ -127,14 +160,15 @@ export async function GET(request: Request) {
         rating: place.rating || 0,
         openNow: place.regularOpeningHours?.openNow ?? null,
         displayHours: overrideData?.hours || place.regularOpeningHours?.weekdayDescriptions?.[new Date().getDay() === 0 ? 6 : new Date().getDay() - 1] || null,
-        isCommunityRecommended: overrideMap.has(place.id) && (overrideMap.get(place.id)!.avg_user_rating > 0),
-        isCommunityHours: !!overrideData?.hours,
         distance: dist,
         distanceText: formatDistance(dist),
         photoRef: place.photos?.[0]?.name ?? null,
         priceLevel: place.priceLevel === "PRICE_LEVEL_FREE" ? 0 : place.priceLevel === "PRICE_LEVEL_INEXPENSIVE" ? 1 : place.priceLevel === "PRICE_LEVEL_MODERATE" ? 2 : place.priceLevel === "PRICE_LEVEL_EXPENSIVE" ? 3 : 4,
         priceRange: place.priceRange || null,
+        isCommunityRecommended: overrideMap.has(place.id) && (overrideMap.get(place.id)!.avg_user_rating > 0),
+        isCommunityHours: !!overrideData?.hours,
         overrideData,
+        relevanceScore, // 用於排序
       };
     });
 
@@ -146,10 +180,17 @@ export async function GET(request: Request) {
       deck = deck.filter(p => !p.priceLevel || (p.priceLevel >= minL && p.priceLevel <= maxL));
     }
 
+    // ==========================================
+    // 精準多維排序 (Multi-dimensional Ranking)
+    // ==========================================
     deck.sort((a, b) => {
-      const dScore = (d: number) => d < 50 ? 5000 : d < 150 ? 2000 : d < 300 ? 500 : d < 500 ? 200 : 100;
-      const scoreA = (a.rating || 0) + dScore(a.distance) + (Math.random() * 0.5);
-      const scoreB = (b.rating || 0) + dScore(b.distance) + (Math.random() * 0.5);
+      // 距離權重：與基礎得分相結合
+      const distScore = (d: number) => d < 50 ? 5000 : d < 150 ? 2500 : d < 300 ? 500 : d < 500 ? 200 : 100;
+      
+      // 總分 = 距離分 + 相關分 + 評分加成 + 隨機微調
+      const scoreA = distScore(a.distance) + (a.relevanceScore || 0) + (a.rating || 0) * 10 + (Math.random() * 0.5);
+      const scoreB = distScore(b.distance) + (b.relevanceScore || 0) + (b.rating || 0) * 10 + (Math.random() * 0.5);
+      
       return scoreB - scoreA;
     });
 
